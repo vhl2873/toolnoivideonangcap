@@ -242,18 +242,52 @@ def _concat_segments(
 ) -> None:
     list_path = final_path.parent / "_concat_segments.txt"
     write_concat_list(segments, list_path)
+    cmd_copy = [
+        ffmpeg_path, "-hide_banner", "-y", "-nostdin",
+        "-fflags", "+genpts+igndts",
+        "-f", "concat", "-safe", "0", "-i", str(list_path),
+        "-map", "0", "-c", "copy",
+        "-movflags", "+faststart",
+        "-avoid_negative_ts", "make_zero",
+        str(final_path),
+    ]
+    emit_log("Ghép final theo chế độ nhanh (stream copy + genpts)...")
     rc = _run(
-        [
-            ffmpeg_path, "-hide_banner", "-y", "-nostdin",
-            "-f", "concat", "-safe", "0", "-i", str(list_path),
-            "-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero", str(final_path),
-        ],
+        cmd_copy,
         emit_log=emit_log,
         stop_check=stop_check,
         active_processes=active_processes,
     )
-    if rc != 0 or not final_path.exists():
+    if rc == 0 and final_path.exists():
+        return
+
+    emit_log(f"Ghép nhanh báo exit {rc}; fallback sang ghép an toàn bằng re-encode final.")
+    safe_final = final_path.with_name(final_path.stem + "_safe.mp4")
+    cmd_safe = [
+        ffmpeg_path, "-hide_banner", "-y", "-nostdin",
+        "-fflags", "+genpts+igndts",
+        "-f", "concat", "-safe", "0", "-i", str(list_path),
+        "-map", "0",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        "-avoid_negative_ts", "make_zero",
+        str(safe_final),
+    ]
+    rc = _run(
+        cmd_safe,
+        emit_log=emit_log,
+        stop_check=stop_check,
+        active_processes=active_processes,
+    )
+    if rc != 0 or not safe_final.exists():
         raise RuntimeError(f"Ghép final.mp4 thất bại: exit {rc}")
+    if final_path.exists():
+        try:
+            final_path.unlink()
+        except OSError:
+            pass
+    safe_final.replace(final_path)
 
 
 def process_voice_split_alternate_zoom_batch(
