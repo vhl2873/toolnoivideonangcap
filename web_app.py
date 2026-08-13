@@ -524,7 +524,7 @@ def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     url = f"http://{HOST}:{PORT}"
     print(f"Fast Video Studio Web: {url}")
-    print(f"Dữ liệu: {DATA_FILE}")
+    print(f"Data file: {DATA_FILE}")
     threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()

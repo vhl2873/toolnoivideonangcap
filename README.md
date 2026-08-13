@@ -1,8 +1,13 @@
-# Fast Video Concatenator
+# Fast Video Studio / Fast Video Concatenator
 
-Ứng dụng desktop Windows dùng để nối nhiều video thành một file duy nhất bằng FFmpeg concat demuxer và stream copy.
+Ứng dụng local Windows để xử lý video bằng FFmpeg.
 
-Mục tiêu của app là nối nhanh, ổn định với file lớn hoặc rất nhiều file dài. App không phải editor, không có timeline, không thêm hiệu ứng. Bản V1 ưu tiên output MKV cho video dài và có thêm chế độ nối theo batch an toàn hơn khi danh sách rất lớn.
+Hiện dự án có 2 giao diện dùng chung một lõi xử lý:
+
+- **Desktop PySide6**: nối video nhanh, phân tích tương thích, preview, các tác vụ media.
+- **Web local control panel**: quản lý dự án, import nhiều video, chạy batch pipeline và theo dõi log/progress trên trình duyệt.
+
+Mục tiêu chính vẫn là **giữ chức năng nối video thật nhanh và ổn định**, đồng thời mở rộng thêm các pipeline xử lý video hàng loạt theo nhu cầu thực tế.
 
 ## Nguyên tắc hoạt động
 
@@ -45,11 +50,25 @@ Khi phân tích, app không chỉ lấy `format.duration` vì metadata container
 ## Cấu trúc project
 
 ```text
-main.py
-ui/
-core/
-workers/
-utils/
+main.py                 # entry desktop app
+web_app.py              # local web server / API điều khiển tool
+START_WEB.bat           # chạy web nhanh trên Windows
+
+core/                   # lõi xử lý FFmpeg / batch pipeline
+  ffmpeg_tools.py
+  media_extra.py
+  batch_pipeline.py
+  mp4_concat.py
+  video_analyzer.py
+
+workers/                # worker cho desktop app
+ui/                     # giao diện desktop PySide6
+web/                    # giao diện web local
+utils/                  # helper/path/resources
+
+data/                   # dữ liệu project/output local khi chạy web
+assets/                 # icon/tài nguyên giao diện
+build/ dist/            # artifact build
 requirements.txt
 README.md
 ```
@@ -111,8 +130,28 @@ python -m pip install -r requirements.txt
 
 ## Chạy app
 
+### Desktop
+
 ```powershell
 python main.py
+```
+
+### Web local
+
+```powershell
+python web_app.py
+```
+
+hoặc:
+
+```powershell
+START_WEB.bat
+```
+
+Web mặc định chạy tại:
+
+```text
+http://127.0.0.1:8765
 ```
 
 Trước lần mở desktop đầu tiên, đặt mật khẩu thiết lập bằng biến môi trường
@@ -156,6 +195,26 @@ Lưu ý:
 - Icon app nằm tại `assets\app_icon.ico` và được nhúng vào file `.exe`.
 - File `.exe` sẽ lớn vì chứa PySide6 và FFmpeg.
 - Khi mở bản `--onefile`, Windows có thể mất vài giây để giải nén nội bộ trước khi cửa sổ hiện ra.
+
+## Pipeline batch mới
+
+Web đang hỗ trợ thêm pipeline hàng loạt cho từng video độc lập:
+
+```text
+voice / bỏ nhạc nền -> cắt đoạn -> zoom so le -> final.mp4
+```
+
+Mỗi video có thể xuất theo kiểu:
+
+```text
+OUTPUT/Video_01/
+  voice.wav
+  segment_001.mp4
+  segment_002.mp4
+  final.mp4
+```
+
+Nếu AI tách giọng (Demucs) chưa có hoặc chạy lỗi, pipeline sẽ ghi log và fallback giữ audio gốc để tránh làm dừng toàn bộ batch.
 
 ## Giới hạn có chủ đích
 
