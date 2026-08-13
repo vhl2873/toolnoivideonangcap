@@ -8,6 +8,11 @@ from typing import Callable
 from core.ffmpeg_tools import hidden_subprocess_kwargs, media_duration_from_probe, run_ffprobe, write_concat_list
 
 
+def _usable_file(path: str | Path) -> bool:
+    candidate = Path(path)
+    return candidate.is_file() and candidate.stat().st_size > 0
+
+
 def _safe_stem(path: str | Path) -> str:
     text = Path(path).stem.strip() or "video"
     for ch in '\\/:*?"<>|':
@@ -93,6 +98,13 @@ def _extract_or_replace_voice(
     voice_wav = work_dir / "voice.wav"
     cleaned_video = work_dir / "_voice_clean_source.mp4"
 
+    if _usable_file(cleaned_video) and _usable_file(voice_wav):
+        emit_log(f"Resume: dùng lại voice.wav và source đã xử lý sẵn cho {src.name}.")
+        return cleaned_video, voice_wav
+    if _usable_file(voice_wav) and not (enable_ai_voice or remove_background):
+        emit_log(f"Resume: dùng lại voice.wav đã có cho {src.name}; giữ audio gốc.")
+        return src, voice_wav
+
     vocal_audio: Path | None = None
     if enable_ai_voice or remove_background:
         vocal_audio = _run_demucs_vocal(
@@ -169,6 +181,10 @@ def _split_exact_segments(
         if length <= 0:
             continue
         out = segments_dir / f"segment_{index + 1:03d}_raw.mp4"
+        if _usable_file(out):
+            emit_log(f"Resume: dùng lại đoạn raw {out.name}")
+            segments.append(out)
+            continue
         emit_log(f"Cắt đoạn {index + 1}/{total}: {start:.3f}s + {length:.3f}s")
         rc = _run(
             [
@@ -204,6 +220,9 @@ def _zoom_segment(
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
 ) -> None:
+    if _usable_file(output_path):
+        emit_log(f"Resume: dùng lại segment đã zoom {output_path.name}")
+        return
     zoom = max(25, min(300, int(zoom_percent))) / 100
     if zoom == 1:
         vf = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
@@ -241,6 +260,9 @@ def _concat_segments(
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
 ) -> None:
+    if _usable_file(final_path):
+        emit_log(f"Resume: final đã tồn tại, bỏ qua ghép lại: {final_path.name}")
+        return
     list_path = final_path.parent / "_concat_segments.txt"
     write_concat_list(segments, list_path)
     cmd_copy = [
@@ -312,6 +334,7 @@ def process_voice_split_alternate_zoom_batch(
     crf: str = "20",
     bitrate: str = "auto",
     final_concat_mode: str = "fast",
+    resume_enabled: bool = True,
     emit_log: Callable[[str], None],
     emit_progress: Callable[[int], None],
     stop_check: Callable[[], bool],
@@ -333,11 +356,12 @@ def process_voice_split_alternate_zoom_batch(
         if stop_check():
             return False, "Đã dừng theo yêu cầu."
         video_dir = root / _safe_stem(src)
-        suffix = 2
-        base_video_dir = video_dir
-        while video_dir.exists() and any(video_dir.iterdir()):
-            video_dir = root / f"{base_video_dir.name}_{suffix}"
-            suffix += 1
+        if not resume_enabled:
+            suffix = 2
+            base_video_dir = video_dir
+            while video_dir.exists() and any(video_dir.iterdir()):
+                video_dir = root / f"{base_video_dir.name}_{suffix}"
+                suffix += 1
         video_dir.mkdir(parents=True, exist_ok=True)
         raw_segments_dir = video_dir / "_raw_segments"
         raw_segments_dir.mkdir(parents=True, exist_ok=True)

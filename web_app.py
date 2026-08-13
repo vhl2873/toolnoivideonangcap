@@ -287,6 +287,7 @@ class JobRunner:
                     crf=str(options.get("crf", "20")),
                     bitrate=str(options.get("bitrate", "auto")),
                     final_concat_mode=str(options.get("final_concat_mode", "fast")),
+                    resume_enabled=bool(options.get("resume_enabled", True)),
                     emit_log=emit,
                     emit_progress=lambda value: STORE.update(project_id, {"progress": max(1, min(95, int(value)))}) or None,
                     stop_check=stopped,
