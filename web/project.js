@@ -82,6 +82,7 @@ function render() {
         <div class="editor-export">
           <span class="badge" style="color:${STATUS_COLORS[p.status]}">${esc(p.status)}</span>
           <button class="button" onclick="editProject()">Cài đặt dự án</button>
+          ${p.status === "Đang chạy" ? `<button class="button danger" onclick="cancelJob()">Dừng / Hủy</button>` : ""}
           <button class="button primary" onclick="selectTool('concat')">Xuất video</button>
         </div>
       </header>
@@ -217,6 +218,15 @@ function inspectorPanels(p) {
 function selectTool(tool) {
   $$("[data-editor-tool]").forEach(button => button.classList.toggle("active", button.dataset.editorTool===tool));
   $$("[data-tool-panel]").forEach(panel => panel.classList.toggle("active", panel.dataset.toolPanel===tool));
+}
+
+async function cancelJob() {
+  if(!confirm("Dừng/hủy tác vụ đang chạy? FFmpeg hiện tại sẽ bị dừng."))return;
+  try {
+    const result=await api(`/api/projects/${project.id}/cancel`, {method:"POST", body:"{}"});
+    toast(result.message);
+    await refreshProject();
+  } catch(error) { toast(error.message); }
 }
 
 async function runTool(operation) {

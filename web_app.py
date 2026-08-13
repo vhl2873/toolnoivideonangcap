@@ -194,6 +194,8 @@ STORE = JsonStore(DATA_FILE)
 class JobRunner:
     def __init__(self) -> None:
         self._running: set[str] = set()
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._active_processes: dict[str, list[subprocess.Popen[str]]] = {}
         self._lock = threading.Lock()
 
     def start(self, project_id: str, operation: str, options: dict) -> tuple[bool, str]:
@@ -201,12 +203,31 @@ class JobRunner:
             if project_id in self._running:
                 return False, "Dự án đang có tác vụ chạy."
             self._running.add(project_id)
+            self._cancel_events[project_id] = threading.Event()
+            self._active_processes[project_id] = []
         threading.Thread(
             target=self._run,
             args=(project_id, operation, options),
             daemon=True,
         ).start()
         return True, "Đã bắt đầu tác vụ."
+
+    def cancel(self, project_id: str) -> tuple[bool, str]:
+        with self._lock:
+            event = self._cancel_events.get(project_id)
+            processes = list(self._active_processes.get(project_id, []))
+            if not event:
+                return False, "Dự án không có tác vụ đang chạy."
+            event.set()
+        for process in processes:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+            except OSError:
+                pass
+        STORE.append_log(project_id, "warning", "Người dùng yêu cầu dừng/hủy tác vụ.")
+        STORE.update(project_id, {"status": "Đã hủy", "error_message": "Người dùng đã hủy tác vụ."})
+        return True, "Đã gửi lệnh dừng/hủy tác vụ."
 
     def _run(self, project_id: str, operation: str, options: dict) -> None:
         try:
@@ -232,9 +253,10 @@ class JobRunner:
             ffprobe = str(tools["ffprobe"])
             STORE.update(project_id, {"status": "Đang chạy", "progress": 1, "error_message": ""})
             STORE.append_log(project_id, "info", f"Bắt đầu: {operation}.")
-            active_processes: list[subprocess.Popen[str]] = []
+            active_processes = self._active_processes.get(project_id, [])
+            cancel_event = self._cancel_events.get(project_id)
             emit = lambda message: STORE.append_log(project_id, "info", str(message))
-            stopped = lambda: False
+            stopped = lambda: bool(cancel_event and cancel_event.is_set())
 
             if operation == "concat":
                 if output.suffix.lower() not in {".mp4", ".mkv"}:
@@ -313,18 +335,25 @@ class JobRunner:
                         break
                 success = bool(results) and all(item[0] for item in results)
                 message = results[-1][1] if results else "Không có kết quả."
-            STORE.append_log(project_id, "info" if success else "error", message)
-            STORE.update(project_id, {
-                "status": "Hoàn thành" if success else "Lỗi",
-                "progress": 100 if success else 0,
-                "error_message": "" if success else message,
-            })
+            if stopped():
+                STORE.append_log(project_id, "warning", "Tác vụ đã bị hủy trước khi hoàn tất.")
+                STORE.update(project_id, {"status": "Đã hủy", "progress": 0, "error_message": "Người dùng đã hủy tác vụ."})
+            else:
+                STORE.append_log(project_id, "info" if success else "error", message)
+                STORE.update(project_id, {
+                    "status": "Hoàn thành" if success else "Lỗi",
+                    "progress": 100 if success else 0,
+                    "error_message": "" if success else message,
+                })
         except Exception as exc:
             STORE.append_log(project_id, "error", str(exc))
-            STORE.update(project_id, {"status": "Lỗi", "progress": 0, "error_message": str(exc)})
+            if not stopped():
+                STORE.update(project_id, {"status": "Lỗi", "progress": 0, "error_message": str(exc)})
         finally:
             with self._lock:
                 self._running.discard(project_id)
+                self._cancel_events.pop(project_id, None)
+                self._active_processes.pop(project_id, None)
 
 
 JOBS = JobRunner()
@@ -425,6 +454,11 @@ class Handler(BaseHTTPRequestHandler):
             project_id = path.split("/")[3]
             body = self._body()
             ok, message = JOBS.start(project_id, str(body.get("operation", "")), dict(body.get("options") or {}))
+            self._json({"ok": ok, "message": message}, 202 if ok else 409)
+            return
+        if path.endswith("/cancel") and path.startswith("/api/projects/"):
+            project_id = path.split("/")[3]
+            ok, message = JOBS.cancel(project_id)
             self._json({"ok": ok, "message": message}, 202 if ok else 409)
             return
         if path.endswith("/duplicate") and path.startswith("/api/projects/"):
