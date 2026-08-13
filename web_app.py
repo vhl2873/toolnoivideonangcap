@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 import webbrowser
 from datetime import datetime
@@ -70,12 +71,25 @@ class JsonStore:
 
     def _write(self, payload: dict) -> None:
         with self.lock:
-            temp = self.path.with_suffix(".tmp")
+            temp = self.path.with_name(f"{self.path.stem}.{uuid.uuid4().hex}.tmp")
             temp.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            os.replace(temp, self.path)
+            last_error: OSError | None = None
+            for _attempt in range(8):
+                try:
+                    os.replace(temp, self.path)
+                    return
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.08)
+            try:
+                temp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if last_error:
+                raise last_error
 
     def list_projects(self) -> list[dict]:
         return self._read()["projects"]
@@ -250,6 +264,7 @@ class JobRunner:
                     pos_y=int(options.get("pos_y", 0)),
                     crf=str(options.get("crf", "20")),
                     bitrate=str(options.get("bitrate", "auto")),
+                    final_concat_mode=str(options.get("final_concat_mode", "fast")),
                     emit_log=emit,
                     emit_progress=lambda value: STORE.update(project_id, {"progress": max(1, min(95, int(value)))}) or None,
                     stop_check=stopped,

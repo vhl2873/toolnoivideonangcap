@@ -204,7 +204,8 @@ function inspectorPanels(p) {
       <div class="xy-grid"><label>Vị trí X<input id="batch-pos-x" type="number" value="0"></label><label>Vị trí Y<input id="batch-pos-y" type="number" value="0"></label></div>
       <label>Chất lượng CRF<input id="batch-crf" type="number" min="12" max="35" value="20"></label>
       <label>Bitrate video<input id="batch-bitrate" placeholder="auto hoặc 8M" value="auto"></label>
-      <div class="info-callout">Output mỗi video: voice.wav, segment_001.mp4..., final.mp4. Nếu 1 video lỗi, batch ghi log và tiếp tục video sau.</div>
+      <label>Ghép final<select id="batch-final-mode"><option value="fast">Nhanh - stream copy</option><option value="safe">An toàn - re-encode final</option></select></label>
+      <div class="info-callout">Output mỗi video: voice.wav, segment_001.mp4..., final.mp4. Chế độ an toàn chậm hơn nhưng giảm lỗi timestamp/DTS.</div>
       <button class="button primary full" onclick="runTool('batch')">Chạy pipeline hàng loạt</button>
     </section>
     <section class="inspector-panel" data-tool-panel="effects"><span class="eyebrow">HIỆU ỨNG</span><h3>Hiệu ứng nhanh</h3>
@@ -239,6 +240,7 @@ async function runTool(operation) {
       pos_y:+$("#batch-pos-y").value,
       crf:$("#batch-crf").value,
       bitrate:$("#batch-bitrate").value || "auto",
+      final_concat_mode:$("#batch-final-mode").value,
     };
   }
   if(operation==="effects"){options={effects:$$(`[data-effect].active`).map(button=>button.dataset.effect)};if(!options.effects.length){toast("Hãy chọn ít nhất một hiệu ứng");return}}

@@ -236,6 +236,7 @@ def _concat_segments(
     final_path: Path,
     ffmpeg_path: str,
     *,
+    final_concat_mode: str = "fast",
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
@@ -251,17 +252,21 @@ def _concat_segments(
         "-avoid_negative_ts", "make_zero",
         str(final_path),
     ]
-    emit_log("Ghép final theo chế độ nhanh (stream copy + genpts)...")
-    rc = _run(
-        cmd_copy,
-        emit_log=emit_log,
-        stop_check=stop_check,
-        active_processes=active_processes,
-    )
-    if rc == 0 and final_path.exists():
-        return
+    final_concat_mode = (final_concat_mode or "fast").lower().strip()
+    if final_concat_mode != "safe":
+        emit_log("Ghép final theo chế độ nhanh (stream copy + genpts)...")
+        rc = _run(
+            cmd_copy,
+            emit_log=emit_log,
+            stop_check=stop_check,
+            active_processes=active_processes,
+        )
+        if rc == 0 and final_path.exists():
+            return
+        emit_log(f"Ghép nhanh báo exit {rc}; fallback sang ghép an toàn bằng re-encode final.")
+    else:
+        emit_log("Ghép final theo chế độ an toàn (re-encode final, ít lỗi timestamp hơn)...")
 
-    emit_log(f"Ghép nhanh báo exit {rc}; fallback sang ghép an toàn bằng re-encode final.")
     safe_final = final_path.with_name(final_path.stem + "_safe.mp4")
     cmd_safe = [
         ffmpeg_path, "-hide_banner", "-y", "-nostdin",
@@ -306,6 +311,7 @@ def process_voice_split_alternate_zoom_batch(
     pos_y: int = 0,
     crf: str = "20",
     bitrate: str = "auto",
+    final_concat_mode: str = "fast",
     emit_log: Callable[[str], None],
     emit_progress: Callable[[int], None],
     stop_check: Callable[[], bool],
@@ -383,6 +389,7 @@ def process_voice_split_alternate_zoom_batch(
                 final_segments,
                 final_path,
                 ffmpeg_path,
+                final_concat_mode=final_concat_mode,
                 emit_log=emit_log,
                 stop_check=stop_check,
                 active_processes=active_processes,
