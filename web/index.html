@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fast Video Studio</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">FV</span>
+        <span><strong>Fast Video</strong><small>Studio local</small></span>
+      </div>
+      <nav id="main-nav">
+        <button class="nav-item active" data-page="overview"><span>▦</span>Tổng quan</button>
+        <button class="nav-item" data-page="projects"><span>◫</span>Dự án</button>
+        <button class="nav-item" data-page="queue"><span>≡</span>Hàng đợi</button>
+        <button class="nav-item" data-page="outputs"><span>▤</span>File đầu ra</button>
+        <button class="nav-item" data-page="history"><span>◷</span>Lịch sử</button>
+        <button class="nav-item" data-page="settings"><span>⚙</span>Cài đặt</button>
+      </nav>
+      <div class="engine-card">
+        <span id="engine-dot" class="engine-dot"></span>
+        <div><strong id="engine-status">Đang kiểm tra</strong><small>FFmpeg Engine</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <button id="mobile-menu" class="icon-button">☰</button>
+          <span class="eyebrow">LOCAL WORKSPACE</span>
+          <h1 id="page-title">Tổng quan dự án</h1>
+        </div>
+        <div class="top-actions">
+          <label class="search"><span>⌕</span><input id="global-search" placeholder="Tìm dự án..."></label>
+          <button id="new-project" class="button primary create-button"><span class="create-icon">＋</span>Tạo dự án</button>
+        </div>
+      </header>
+
+      <section id="page-overview" class="page active">
+        <div id="stats" class="stats-grid"></div>
+        <div class="content-grid">
+          <section class="panel project-panel">
+            <div class="panel-head">
+              <div><span class="eyebrow">WORKSPACE</span><h2>Danh sách dự án</h2></div>
+              <div class="filters">
+                <select id="status-filter"></select>
+                <select id="task-filter"></select>
+                <select id="priority-filter"></select>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Dự án</th><th>Tác vụ</th><th>Ưu tiên</th><th>Trạng thái</th><th>Tiến trình</th><th></th></tr></thead>
+                <tbody id="project-rows"></tbody>
+              </table>
+            </div>
+            <div id="empty-projects" class="empty hidden">
+              <div class="empty-icon">◫</div><h3>Chưa có dự án</h3>
+              <p>Tạo dự án đầu tiên để bắt đầu xử lý video trên máy.</p>
+              <button class="button primary create-trigger"><span class="create-icon">＋</span>Tạo dự án mới</button>
+            </div>
+          </section>
+          <aside id="project-detail" class="panel detail-panel"></aside>
+        </div>
+      </section>
+
+      <section id="page-projects" class="page"></section>
+      <section id="page-queue" class="page"></section>
+      <section id="page-outputs" class="page"></section>
+      <section id="page-history" class="page"></section>
+      <section id="page-settings" class="page"></section>
+      <section id="page-workspace" class="page"></section>
+    </main>
+  </div>
+
+  <footer class="system-bar">
+    <span>● Local only</span><span id="disk-stat">Ổ đĩa: --</span>
+    <span id="queue-stat">Hàng đợi: 0</span><span id="running-stat">Đang chạy: 0</span>
+    <span class="system-path" id="data-path"></span>
+  </footer>
+
+  <dialog id="project-dialog">
+    <form id="project-form">
+      <div class="modal-head">
+        <div><span class="eyebrow">GIAO DIỆN SỐ 2</span><h2 id="dialog-title">Tạo dự án mới</h2></div>
+        <button type="button" class="icon-button close-dialog">×</button>
+      </div>
+      <input type="hidden" name="id">
+      <div class="form-grid">
+        <label class="full">Tên dự án<input name="name" required placeholder="Ví dụ: Video YouTube tháng 7"></label>
+        <label class="advanced-project-fields">Loại tác vụ<select name="task_type"></select></label>
+        <label class="advanced-project-fields">Mức ưu tiên<select name="priority"></select></label>
+        <label class="full advanced-project-fields">File video nguồn
+          <textarea name="input_paths" rows="3" placeholder="Mỗi đường dẫn một dòng&#10;D:\Videos\part-01.mp4"></textarea>
+        </label>
+        <label class="full advanced-project-fields">Thư mục đầu ra<input name="output_path" placeholder="D:\VideoTool\Output"></label>
+      </div>
+      <div id="task-settings" class="task-settings advanced-project-fields"></div>
+      <div class="modal-actions">
+        <button type="button" class="button close-dialog">Hủy</button>
+        <button id="project-submit" type="submit" class="button primary">Lưu dự án</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast-container"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
