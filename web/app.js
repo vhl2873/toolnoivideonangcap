@@ -96,6 +96,21 @@ function renderStats() {
   });
 }
 
+function stageText(p){
+  const parts=[];
+  if(p.job_stage)parts.push(p.job_stage);
+  if(p.current_step)parts.push(p.current_step);
+  return parts.join(" • ") || "Chưa có tiến trình chi tiết";
+}
+
+function videoProgressText(p){
+  const total=Number(p.total_videos||0);
+  const done=Number(p.processed_videos||0);
+  const current=p.current_video||"";
+  if(!total)return current || "Chưa có video";
+  return `${done}/${total} video${current?` • ${current}`:""}`;
+}
+
 function renderProjects() {
   const projects = filteredProjects();
   $("#empty-projects").classList.toggle("hidden", projects.length>0);
@@ -105,8 +120,8 @@ function renderProjects() {
         <strong>${esc(p.name)}</strong><small>${p.input_paths?.length||0} video • ${esc(p.output_path||"Chưa chọn đầu ra")}</small>
       </span></div></td>
       <td>${esc(p.task_type)}</td><td><span class="priority">${esc(p.priority)}</span></td>
-      <td><span class="badge" style="color:${STATUS_COLORS[p.status]}">${esc(p.status)}</span></td>
-      <td><div class="progress"><span style="width:${p.progress||0}%"></span></div><div class="progress-label">${p.progress||0}%</div></td>
+      <td><span class="badge" style="color:${STATUS_COLORS[p.status]}">${esc(p.status)}</span><div class="status-subline">${esc(stageText(p))}</div></td>
+      <td><div class="progress"><span style="width:${p.progress||0}%"></span></div><div class="progress-label">${p.progress||0}% • ${esc(videoProgressText(p))}</div></td>
       <td><div class="row-actions">
         <button class="action-icon primary" data-row-action="open" data-id="${p.id}" title="Mở dự án">${icon("open")}</button>
         <button class="action-icon success" data-row-action="run" data-id="${p.id}" title="Chạy dự án">${icon("play")}</button>
@@ -145,8 +160,12 @@ function renderDetail() {
       <div class="meta-row"><span>Đầu ra</span><b>${esc(p.output_path||"Chưa chọn")}</b></div>
       <div class="meta-row"><span>Ưu tiên</span><b>${esc(p.priority)}</b></div>
       <div class="meta-row"><span>Ngày tạo</span><b>${formatDate(p.created_at)}</b></div>
+      <div class="meta-row"><span>Giai đoạn</span><b>${esc(p.job_stage||"—")}</b></div>
+      <div class="meta-row"><span>Bước hiện tại</span><b>${esc(p.current_step||"—")}</b></div>
+      <div class="meta-row"><span>Video hiện tại</span><b>${esc(p.current_video||"—")}</b></div>
+      <div class="meta-row"><span>Tiến độ video</span><b>${esc(videoProgressText(p))}</b></div>
     </div>
-    <div class="progress"><span style="width:${p.progress||0}%"></span></div><div class="progress-label">${p.progress||0}% hoàn thành</div>
+    <div class="progress"><span style="width:${p.progress||0}%"></span></div><div class="progress-label">${p.progress||0}% hoàn thành • ${esc(stageText(p))}</div>
     <div class="detail-actions">
       <button class="button primary" data-action="run">Chạy / Tiếp tục</button>
       <button class="button" data-action="pause">Tạm dừng</button>
@@ -239,7 +258,7 @@ function renderWorkspace() {
         </main>
         <aside class="inspector">
           <div class="inspector-tabs"><button class="active">Thuộc tính</button><button>Điều chỉnh</button></div>
-          <section class="inspector-panel active" data-tool-panel="media"><span class="eyebrow">THÔNG TIN DỰ ÁN</span><h3>${esc(p.name)}</h3><div class="property-list"><label>Video nguồn <b>${p.input_paths?.length||0} file</b></label><label>Đầu ra <b>${esc(p.output_path||"Chưa chọn")}</b></label><label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label></div><button class="button full" onclick="projectActionById('edit','${p.id}')">Chỉnh file và đầu ra</button></section>
+          <section class="inspector-panel active" data-tool-panel="media"><span class="eyebrow">THÔNG TIN DỰ ÁN</span><h3>${esc(p.name)}</h3><div class="property-list"><label>Video nguồn <b>${p.input_paths?.length||0} file</b></label><label>Đầu ra <b>${esc(p.output_path||"Chưa chọn")}</b></label><label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label><label>Giai đoạn <b>${esc(p.job_stage||"—")}</b></label><label>Đang làm <b>${esc(p.current_step||"—")}</b></label><label>Video hiện tại <b>${esc(videoProgressText(p))}</b></label></div><button class="button full" onclick="projectActionById('edit','${p.id}')">Chỉnh file và đầu ra</button></section>
           <section class="inspector-panel" data-tool-panel="concat"><span class="eyebrow">NỐI VIDEO DÀI</span><h3>Thiết lập xuất</h3><label>Định dạng<select id="concat-format"><option value="mkv">MKV — khuyên dùng</option><option value="mp4">MP4</option></select></label><label class="check"><input id="concat-safe" type="checkbox"> Sửa timestamp an toàn</label><div class="info-callout">Stream copy giúp nối nhanh mà không giảm chất lượng.</div><button class="button primary full" onclick="runWorkspaceTool('concat')">Nối ${p.input_paths?.length||0} video</button></section>
           <section class="inspector-panel" data-tool-panel="split"><span class="eyebrow">BĂM NHỎ VIDEO</span><h3>Chia theo thời lượng</h3><label>Thời lượng mỗi đoạn<div class="input-unit"><input id="split-seconds" type="number" min="1" value="60"><span>giây</span></div></label><label class="check"><input id="split-accurate" type="checkbox"> Chính xác từng khung hình</label><button class="button primary full" onclick="runWorkspaceTool('split')">Bắt đầu băm nhỏ</button></section>
           <section class="inspector-panel" data-tool-panel="zoom"><span class="eyebrow">BIẾN ĐỔI</span><h3>Phóng to / thu nhỏ</h3><label>Thu phóng<div class="range-row"><input id="zoom-range" type="range" min="25" max="300" value="110" oninput="document.querySelector('#zoom-percent').value=this.value"><input id="zoom-percent" type="number" min="25" max="300" value="110"></div></label><div class="xy-grid"><label>Vị trí X<input id="zoom-x" type="number" value="0"></label><label>Vị trí Y<input id="zoom-y" type="number" value="0"></label></div><button class="button primary full" onclick="runWorkspaceTool('zoom')">Áp dụng biến đổi</button></section>

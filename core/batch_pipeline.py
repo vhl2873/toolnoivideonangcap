@@ -337,6 +337,7 @@ def process_voice_split_alternate_zoom_batch(
     resume_enabled: bool = True,
     emit_log: Callable[[str], None],
     emit_progress: Callable[[int], None],
+    emit_status: Callable[[dict], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
 ) -> tuple[bool, str]:
@@ -366,7 +367,15 @@ def process_voice_split_alternate_zoom_batch(
         raw_segments_dir = video_dir / "_raw_segments"
         raw_segments_dir.mkdir(parents=True, exist_ok=True)
         emit_log(f"===== Xử lý video {video_index}/{len(paths)}: {src.name} =====")
+        emit_status({
+            "job_stage": "Đang xử lý batch",
+            "current_video": src.name,
+            "current_step": "Chuẩn bị video",
+            "processed_videos": max(0, video_index - 1),
+            "total_videos": len(paths),
+        })
         try:
+            emit_status({"current_step": "Tách voice / chuẩn bị audio"})
             source_for_split, voice_path = _extract_or_replace_voice(
                 src,
                 video_dir,
@@ -379,6 +388,7 @@ def process_voice_split_alternate_zoom_batch(
             )
             if voice_path:
                 emit_log(f"Đã có voice.wav: {voice_path}")
+            emit_status({"current_step": "Cắt đoạn"})
             raw_segments = _split_exact_segments(
                 source_for_split,
                 raw_segments_dir,
@@ -390,6 +400,7 @@ def process_voice_split_alternate_zoom_batch(
                 active_processes=active_processes,
             )
             final_segments: list[Path] = []
+            emit_status({"current_step": "Zoom xen kẽ từng đoạn"})
             for idx, raw in enumerate(raw_segments, 1):
                 zoom = odd_zoom_percent if idx % 2 == 1 else even_zoom_percent
                 out = video_dir / f"segment_{idx:03d}.mp4"
@@ -409,6 +420,7 @@ def process_voice_split_alternate_zoom_batch(
                 )
                 final_segments.append(out)
             final_path = video_dir / "final.mp4"
+            emit_status({"current_step": "Ghép final.mp4"})
             _concat_segments(
                 final_segments,
                 final_path,
@@ -419,6 +431,11 @@ def process_voice_split_alternate_zoom_batch(
                 active_processes=active_processes,
             )
             ok_count += 1
+            emit_status({
+                "current_step": "Hoàn thành video",
+                "processed_videos": video_index,
+                "current_video": src.name,
+            })
             emit_log(f"Hoàn thành {src.name}: {final_path}")
         except Exception as exc:
             message = f"Lỗi {src.name}: {exc}"

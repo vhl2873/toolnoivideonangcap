@@ -128,6 +128,7 @@ class JsonStore:
             allowed = {
                 "name", "task_type", "status", "progress", "priority",
                 "input_paths", "output_path", "settings", "error_message",
+                "job_stage", "current_video", "current_step", "processed_videos", "total_videos",
             }
             for key, value in changes.items():
                 if key in allowed:
@@ -251,7 +252,11 @@ class JobRunner:
                 raise RuntimeError("Không tìm thấy FFmpeg/FFprobe.")
             ffmpeg = str(tools["ffmpeg"])
             ffprobe = str(tools["ffprobe"])
-            STORE.update(project_id, {"status": "Đang chạy", "progress": 1, "error_message": ""})
+            STORE.update(project_id, {
+                "status": "Đang chạy", "progress": 1, "error_message": "",
+                "job_stage": "Chuẩn bị", "current_video": "", "current_step": "Kiểm tra đầu vào",
+                "processed_videos": 0, "total_videos": len(paths),
+            })
             STORE.append_log(project_id, "info", f"Bắt đầu: {operation}.")
             active_processes = self._active_processes.get(project_id, [])
             cancel_event = self._cancel_events.get(project_id)
@@ -290,6 +295,7 @@ class JobRunner:
                     resume_enabled=bool(options.get("resume_enabled", True)),
                     emit_log=emit,
                     emit_progress=lambda value: STORE.update(project_id, {"progress": max(1, min(95, int(value)))}) or None,
+                    emit_status=lambda changes: STORE.update(project_id, changes) or None,
                     stop_check=stopped,
                     active_processes=active_processes,
                 )
@@ -331,7 +337,12 @@ class JobRunner:
                     else:
                         raise RuntimeError("Tác vụ không được hỗ trợ.")
                     results.append(result)
-                    STORE.update(project_id, {"progress": int(index * 95 / len(paths))})
+                    STORE.update(project_id, {
+                        "progress": int(index * 95 / len(paths)),
+                        "processed_videos": index,
+                        "current_video": Path(input_path).name,
+                        "current_step": operation,
+                    })
                     if not result[0]:
                         break
                 success = bool(results) and all(item[0] for item in results)
@@ -345,6 +356,8 @@ class JobRunner:
                     "status": "Hoàn thành" if success else "Lỗi",
                     "progress": 100 if success else 0,
                     "error_message": "" if success else message,
+                    "job_stage": "Hoàn tất" if success else "Lỗi",
+                    "current_step": "Xong" if success else "Có lỗi",
                 })
         except Exception as exc:
             STORE.append_log(project_id, "error", str(exc))

@@ -17,6 +17,20 @@ let previewAnimationFrame = 0;
 let timelineDurations = [];
 const mediaDurationCache = new Map();
 
+function stageText(p){
+  const parts=[];
+  if(p.job_stage)parts.push(p.job_stage);
+  if(p.current_step)parts.push(p.current_step);
+  return parts.join(" • ") || "Chưa có tiến trình chi tiết";
+}
+function videoProgressText(p){
+  const total=Number(p.total_videos||0);
+  const done=Number(p.processed_videos||0);
+  const current=p.current_video||"";
+  if(!total)return current || "Chưa có video";
+  return `${done}/${total} video${current?` • ${current}`:""}`;
+}
+
 async function api(path, options={}) {
   const response = await fetch(path, {
     headers:{"Content-Type":"application/json"}, ...options
@@ -80,7 +94,8 @@ function render() {
           <span>Đã lưu tự động vào JSON</span>
         </div>
         <div class="editor-export">
-          <span class="badge" style="color:${STATUS_COLORS[p.status]}">${esc(p.status)}</span>
+          <span class="badge" style="color:${STATUS_COLORS[p.status]}" title="${esc(stageText(p))}">${esc(p.status)}</span>
+          <span class="job-chip" title="${esc(videoProgressText(p))}">${p.progress||0}% • ${esc(p.current_step||"Sẵn sàng")}</span>
           <button class="button" onclick="editProject()">Cài đặt dự án</button>
           ${p.status === "Đang chạy" ? `<button class="button danger" onclick="cancelJob()">Dừng / Hủy</button>` : ""}
           <button class="button primary" onclick="selectTool('concat')">Xuất video</button>
@@ -140,7 +155,7 @@ function render() {
       </section>
       <aside class="floating-job-log">
         <button onclick="this.parentElement.classList.toggle('open')">▤ <span>${p.progress||0}%</span></button>
-        <div><strong>Nhật ký xử lý</strong><div class="log-box">${logs || "Chưa có nhật ký."}</div></div>
+        <div><strong>Nhật ký xử lý</strong><div class="job-progress-card"><b>${esc(stageText(p))}</b><small>${esc(videoProgressText(p))}</small><div class="progress"><span style="width:${p.progress||0}%"></span></div></div><div class="log-box">${logs || "Chưa có nhật ký."}</div></div>
       </aside>
     </div>`;
   $("#asset-query").addEventListener("input", filterAssets);
@@ -171,7 +186,7 @@ function inspectorPanels(p) {
       <span class="eyebrow">THÔNG TIN DỰ ÁN</span><h3>${esc(p.name)}</h3>
       <div class="property-list"><label>Video nguồn <b>${p.input_paths?.length||0} file</b></label>
       <label>Đầu ra <b>${esc(p.output_path||"Chưa chọn")}</b></label>
-      <label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label></div>
+      <label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label><label>Giai đoạn <b>${esc(p.job_stage||"—")}</b></label><label>Đang làm <b>${esc(p.current_step||"—")}</b></label><label>Video hiện tại <b>${esc(videoProgressText(p))}</b></label></div>
       <button class="button full" onclick="editProject()">Chỉnh file và đầu ra</button>
     </section>
     <section class="inspector-panel" data-tool-panel="concat"><span class="eyebrow">NỐI VIDEO DÀI</span><h3>Thiết lập xuất</h3>
