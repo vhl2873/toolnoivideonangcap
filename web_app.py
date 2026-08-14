@@ -192,6 +192,30 @@ class JsonStore:
 STORE = JsonStore(DATA_FILE)
 
 
+
+
+def _latest_final_for_project(project: dict) -> Path | None:
+    output_text = str(project.get("output_path", "")).strip()
+    if not output_text:
+        return None
+    output = Path(output_text).resolve()
+    if output.is_file():
+        return output
+    if not output.is_dir():
+        return None
+    candidates = sorted(
+        [item for item in output.glob("**/final.mp4") if item.is_file()],
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+def _open_path(path: Path) -> None:
+    if os.name == "nt":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    else:
+        subprocess.Popen(["xdg-open", str(path)], **hidden_subprocess_kwargs())
 class JobRunner:
     def __init__(self) -> None:
         self._running: set[str] = set()
@@ -475,12 +499,49 @@ class Handler(BaseHTTPRequestHandler):
             ok, message = JOBS.cancel(project_id)
             self._json({"ok": ok, "message": message}, 202 if ok else 409)
             return
+        if path.endswith("/open-output") and path.startswith("/api/projects/"):
+            self._open_project_output(path.split("/")[3])
+            return
+        if path.endswith("/open-final") and path.startswith("/api/projects/"):
+            self._open_project_final(path.split("/")[3])
+            return
         if path.endswith("/duplicate") and path.startswith("/api/projects/"):
             project_id = path.split("/")[3]
             result = STORE.duplicate(project_id)
             self._json(result or {"error": "Không tìm thấy dự án"}, 201 if result else 404)
             return
         self._json({"error": "API không tồn tại"}, 404)
+
+    def _open_project_output(self, project_id: str) -> None:
+        project = next((p for p in STORE.list_projects() if p["id"] == project_id), None)
+        if not project:
+            self._json({"error": "Không tìm thấy dự án"}, 404)
+            return
+        output_text = str(project.get("output_path", "")).strip()
+        if not output_text:
+            self._json({"error": "Dự án chưa có thư mục output"}, 404)
+            return
+        output = Path(output_text).resolve()
+        target = output if output.is_dir() else output.parent
+        if not target.exists():
+            self._json({"error": "Thư mục output chưa tồn tại"}, 404)
+            return
+        _open_path(target)
+        STORE.append_log(project_id, "info", f"Đã mở thư mục output: {target}")
+        self._json({"ok": True, "message": "Đã mở thư mục output", "path": str(target)})
+
+    def _open_project_final(self, project_id: str) -> None:
+        project = next((p for p in STORE.list_projects() if p["id"] == project_id), None)
+        if not project:
+            self._json({"error": "Không tìm thấy dự án"}, 404)
+            return
+        final_path = _latest_final_for_project(project)
+        if not final_path:
+            self._json({"error": "Chưa tìm thấy final.mp4 trong output"}, 404)
+            return
+        _open_path(final_path)
+        STORE.append_log(project_id, "info", f"Đã mở final gần nhất: {final_path}")
+        self._json({"ok": True, "message": "Đã mở final.mp4 gần nhất", "path": str(final_path)})
 
     def do_PATCH(self) -> None:
         path = urlparse(self.path).path

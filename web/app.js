@@ -20,7 +20,8 @@ const ICON_PATHS = {
   copy:'<rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   trash:'<path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v5M14 11v5"/>',
   plus:'<path d="M12 5v14M5 12h14"/>', more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
-  folder:'<path d="M3 6h6l2 2h10v11H3z"/>', search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>'
+  folder:'<path d="M3 6h6l2 2h10v11H3z"/>', search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+  video:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>'
 };
 const icon = name => `<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[name]||""}</svg>`;
 
@@ -124,6 +125,8 @@ function renderProjects() {
       <td><div class="progress"><span style="width:${p.progress||0}%"></span></div><div class="progress-label">${p.progress||0}% • ${esc(videoProgressText(p))}</div></td>
       <td><div class="row-actions">
         <button class="action-icon primary" data-row-action="open" data-id="${p.id}" title="Mở dự án">${icon("open")}</button>
+        <button class="action-icon" data-row-action="open-output" data-id="${p.id}" title="Mở thư mục output">${icon("folder")}</button>
+        <button class="action-icon" data-row-action="open-final" data-id="${p.id}" title="Mở final.mp4 gần nhất">${icon("video")}</button>
         <button class="action-icon success" data-row-action="run" data-id="${p.id}" title="Chạy dự án">${icon("play")}</button>
         <button class="action-icon" data-row-action="edit" data-id="${p.id}" title="Chỉnh sửa">${icon("edit")}</button>
         <button class="action-icon" data-row-action="duplicate" data-id="${p.id}" title="Nhân bản">${icon("copy")}</button>
@@ -168,7 +171,8 @@ function renderDetail() {
     <div class="progress"><span style="width:${p.progress||0}%"></span></div><div class="progress-label">${p.progress||0}% hoàn thành • ${esc(stageText(p))}</div>
     <div class="detail-actions">
       <button class="button primary" data-action="run">Chạy / Tiếp tục</button>
-      <button class="button" data-action="pause">Tạm dừng</button>
+      <button class="button" data-action="open-output">Mở output</button>
+      <button class="button" data-action="open-final">Mở final</button>
       <button class="button" data-action="edit">Chỉnh sửa</button>
       <button class="button" data-action="duplicate">Nhân bản</button>
     </div>
@@ -189,6 +193,8 @@ async function projectAction(action,p) {
   try {
     if (action==="run") await updateProject(p.id,{status:"Đang chờ"});
     if (action==="pause") await updateProject(p.id,{status:"Tạm dừng"});
+    if (action==="open-output") { const r=await api(`/api/projects/${p.id}/open-output`,{method:"POST",body:"{}"}); toast(r.message); await reloadProjects(); }
+    if (action==="open-final") { const r=await api(`/api/projects/${p.id}/open-final`,{method:"POST",body:"{}"}); toast(r.message); await reloadProjects(); }
     if (action==="edit") openProjectDialog(p);
     if (action==="duplicate") { await api(`/api/projects/${p.id}/duplicate`,{method:"POST"}); await reloadProjects(); toast("Đã nhân bản dự án"); }
     if (action==="delete" && confirm(`Xóa dự án “${p.name}”?`)) {
@@ -234,7 +240,7 @@ function renderWorkspace() {
       <header class="editor-topbar">
         <div class="editor-project-title"><button class="editor-back" onclick="navigate('projects')">‹</button><div><small>DỰ ÁN</small><strong>${esc(p.name)}</strong></div></div>
         <div class="editor-history"><button title="Hoàn tác">↶</button><button title="Làm lại">↷</button><span>Đã lưu tự động</span></div>
-        <div class="editor-export"><span class="badge" style="color:${STATUS_COLORS[p.status]}">${esc(p.status)}</span><button class="button" onclick="projectActionById('edit','${p.id}')">Cài đặt dự án</button><button class="button primary" onclick="selectEditorTool('concat')">Xuất video</button></div>
+        <div class="editor-export"><span class="badge" style="color:${STATUS_COLORS[p.status]}">${esc(p.status)}</span><button class="button" onclick="projectActionById('open-output','${p.id}')">Mở output</button><button class="button" onclick="projectActionById('open-final','${p.id}')">Mở final</button><button class="button" onclick="projectActionById('edit','${p.id}')">Cài đặt dự án</button><button class="button primary" onclick="selectEditorTool('concat')">Xuất video</button></div>
       </header>
       <div class="editor-main">
         <nav class="editor-rail">

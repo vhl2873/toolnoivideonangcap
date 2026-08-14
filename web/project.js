@@ -96,6 +96,8 @@ function render() {
         <div class="editor-export">
           <span class="badge" style="color:${STATUS_COLORS[p.status]}" title="${esc(stageText(p))}">${esc(p.status)}</span>
           <span class="job-chip" title="${esc(videoProgressText(p))}">${p.progress||0}% • ${esc(p.current_step||"Sẵn sàng")}</span>
+          <button class="button" onclick="openOutputFolder()">Mở output</button>
+          <button class="button" onclick="openFinalVideo()">Mở final</button>
           <button class="button" onclick="editProject()">Cài đặt dự án</button>
           ${p.status === "Đang chạy" ? `<button class="button danger" onclick="cancelJob()">Dừng / Hủy</button>` : ""}
           <button class="button primary" onclick="selectTool('concat')">Xuất video</button>
@@ -234,6 +236,22 @@ function inspectorPanels(p) {
 function selectTool(tool) {
   $$("[data-editor-tool]").forEach(button => button.classList.toggle("active", button.dataset.editorTool===tool));
   $$("[data-tool-panel]").forEach(panel => panel.classList.toggle("active", panel.dataset.toolPanel===tool));
+}
+
+async function openOutputFolder() {
+  try {
+    const result=await api(`/api/projects/${project.id}/open-output`, {method:"POST", body:"{}"});
+    toast(result.message);
+    await refreshProject();
+  } catch(error) { toast(error.message); }
+}
+
+async function openFinalVideo() {
+  try {
+    const result=await api(`/api/projects/${project.id}/open-final`, {method:"POST", body:"{}"});
+    toast(result.message);
+    await refreshProject();
+  } catch(error) { toast(error.message); }
 }
 
 async function cancelJob() {
