@@ -215,6 +215,46 @@ def _collect_retry_failed_paths(paths: list[str], output: Path) -> list[str]:
     return failed
 
 
+def _video_output_dir(project: dict, source: str | Path) -> Path | None:
+    output_text = str(project.get("output_path", "")).strip()
+    if not output_text:
+        return None
+    output = Path(output_text).resolve()
+    if not output.is_dir():
+        return None
+    return output / _safe_stem(source)
+
+
+def _batch_results_for_project(project: dict) -> list[dict]:
+    results: list[dict] = []
+    for index, raw_path in enumerate(project.get("input_paths") or []):
+        source = Path(raw_path).resolve()
+        video_dir = _video_output_dir(project, source)
+        state_path = video_dir / "project_state.json" if video_dir else None
+        process_log = video_dir / "process.log" if video_dir else None
+        final_path = video_dir / "final.mp4" if video_dir else None
+        state: dict = {}
+        if state_path and state_path.is_file():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state = {"status": "unknown", "error": "Không đọc được project_state.json"}
+        status = str(state.get("status") or "not_run")
+        results.append({
+            "index": index,
+            "source": str(source),
+            "name": source.name,
+            "status": status,
+            "step": state.get("step", ""),
+            "error": state.get("error", ""),
+            "parts": state.get("parts", 0),
+            "final_path": str(final_path) if final_path and final_path.is_file() else "",
+            "log_path": str(process_log) if process_log and process_log.is_file() else "",
+            "updated_at": state.get("updated_at", ""),
+        })
+    return results
+
+
 def _latest_final_for_project(project: dict) -> Path | None:
     output_text = str(project.get("output_path", "")).strip()
     if not output_text:
@@ -454,6 +494,11 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/projects":
             self._json({"projects": STORE.list_projects()})
             return
+        if parsed.path.endswith("/batch-results") and parsed.path.startswith("/api/projects/"):
+            project_id = parsed.path.split("/")[3]
+            project = next((p for p in STORE.list_projects() if p["id"] == project_id), None)
+            self._json({"results": _batch_results_for_project(project)} if project else {"error": "Không tìm thấy dự án"}, 200 if project else 404)
+            return
         if parsed.path.startswith("/api/projects/") and "/media/" in parsed.path:
             parts = parsed.path.strip("/").split("/")
             if len(parts) == 6 and parts[0] == "api" and parts[1] == "projects" and parts[3] == "media" and parts[5] == "info":
@@ -533,6 +578,11 @@ class Handler(BaseHTTPRequestHandler):
         if path.endswith("/open-final") and path.startswith("/api/projects/"):
             self._open_project_final(path.split("/")[3])
             return
+        if "/open-result/" in path and path.startswith("/api/projects/"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 5:
+                self._open_project_result(parts[2], parts[4])
+                return
         if path.endswith("/duplicate") and path.startswith("/api/projects/"):
             project_id = path.split("/")[3]
             result = STORE.duplicate(project_id)
@@ -570,6 +620,39 @@ class Handler(BaseHTTPRequestHandler):
         _open_path(final_path)
         STORE.append_log(project_id, "info", f"Đã mở final gần nhất: {final_path}")
         self._json({"ok": True, "message": "Đã mở final.mp4 gần nhất", "path": str(final_path)})
+
+    def _open_project_result(self, project_id: str, result_index_text: str) -> None:
+        project = next((p for p in STORE.list_projects() if p["id"] == project_id), None)
+        if not project:
+            self._json({"error": "Không tìm thấy dự án"}, 404)
+            return
+        try:
+            result_index = int(result_index_text)
+        except ValueError:
+            self._json({"error": "Index kết quả không hợp lệ"}, 400)
+            return
+        results = _batch_results_for_project(project)
+        if result_index < 0 or result_index >= len(results):
+            self._json({"error": "Không tìm thấy kết quả video"}, 404)
+            return
+        result = results[result_index]
+        target_key = str(urlparse(self.path).query or "final").strip().lower()
+        if target_key == "log":
+            target_path = result.get("log_path")
+            success_message = "Đã mở process.log"
+        else:
+            target_path = result.get("final_path")
+            success_message = "Đã mở final.mp4 của video"
+        if not target_path:
+            self._json({"error": "File kết quả chưa tồn tại"}, 404)
+            return
+        resolved = Path(target_path).resolve()
+        if not resolved.exists():
+            self._json({"error": "File kết quả không còn tồn tại"}, 404)
+            return
+        _open_path(resolved)
+        STORE.append_log(project_id, "info", f"Đã mở {resolved}")
+        self._json({"ok": True, "message": success_message, "path": str(resolved)})
 
     def do_PATCH(self) -> None:
         path = urlparse(self.path).path

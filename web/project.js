@@ -11,6 +11,7 @@ const STATUS_COLORS = {
 
 const projectId = new URLSearchParams(location.search).get("id");
 let project = null;
+let batchResults = [];
 let selectedMediaIndex = 0;
 let selectedTimelineIndex = -1;
 let previewAnimationFrame = 0;
@@ -51,6 +52,8 @@ async function loadProject() {
     return;
   }
   document.title = `${project.name} — Fast Video Studio`;
+  try { batchResults = (await api(`/api/projects/${project.id}/batch-results`)).results || []; }
+  catch { batchResults = []; }
   const timelinePaths = project.settings?.timeline_paths || [];
   if(timelinePaths.length){selectedTimelineIndex=0;selectedMediaIndex=project.input_paths.indexOf(timelinePaths[0])}
   else {const browserPlayable = project.input_paths?.findIndex(path => /\.(mp4|m4v|webm|ogv)$/i.test(path));if(browserPlayable>=0)selectedMediaIndex=browserPlayable}
@@ -182,6 +185,17 @@ function render() {
   });
 }
 
+function batchResultPanel() {
+  if(!batchResults.length)return `<div class="batch-results-empty">Chưa có kết quả batch.</div>`;
+  return `<div class="batch-results-list">${batchResults.map(item=>`
+    <div class="batch-result ${esc(item.status)}">
+      <div><b>${esc(item.name)}</b><small>${esc(item.step||item.status)}${item.error?` • ${esc(item.error)}`:""}</small></div>
+      <span class="batch-status">${esc(item.status)}</span>
+      <button type="button" onclick="openBatchResult(${item.index},'final')" ${item.final_path?"":"disabled"}>Final</button>
+      <button type="button" onclick="openBatchResult(${item.index},'log')" ${item.log_path?"":"disabled"}>Log</button>
+    </div>`).join("")}</div>`;
+}
+
 function inspectorPanels(p) {
   return `
     <section class="inspector-panel active" data-tool-panel="media">
@@ -189,6 +203,7 @@ function inspectorPanels(p) {
       <div class="property-list"><label>Video nguồn <b>${p.input_paths?.length||0} file</b></label>
       <label>Đầu ra <b>${esc(p.output_path||"Chưa chọn")}</b></label>
       <label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label><label>Giai đoạn <b>${esc(p.job_stage||"—")}</b></label><label>Đang làm <b>${esc(p.current_step||"—")}</b></label><label>Video hiện tại <b>${esc(videoProgressText(p))}</b></label></div>
+      <div class="batch-results-card"><b>Kết quả từng video</b>${batchResultPanel()}</div>
       <button class="button full" onclick="editProject()">Chỉnh file và đầu ra</button>
     </section>
     <section class="inspector-panel" data-tool-panel="concat"><span class="eyebrow">NỐI VIDEO DÀI</span><h3>Thiết lập xuất</h3>
@@ -252,6 +267,14 @@ async function openFinalVideo() {
     const result=await api(`/api/projects/${project.id}/open-final`, {method:"POST", body:"{}"});
     toast(result.message);
     await refreshProject();
+  } catch(error) { toast(error.message); }
+}
+
+async function openBatchResult(index,type) {
+  try {
+    const suffix = type === 'log' ? '?log' : '?final';
+    const result=await api(`/api/projects/${project.id}/open-result/${index}${suffix}`, {method:"POST", body:"{}"});
+    toast(result.message);
   } catch(error) { toast(error.message); }
 }
 
@@ -550,7 +573,12 @@ function filterAssets(event) {
 async function refreshProject() {
   const payload=await api("/api/projects");
   const updated=payload.projects.find(item=>item.id===projectId);
-  if(updated){project=updated;render()}
+  if(updated){
+    project=updated;
+    try { batchResults = (await api(`/api/projects/${project.id}/batch-results`)).results || []; }
+    catch { batchResults = []; }
+    render();
+  }
 }
 function fileName(path){return String(path).split(/[\\/]/).pop()}
 function toast(message){const el=document.createElement("div");el.className="toast";el.textContent=message;$("#toast-container").append(el);setTimeout(()=>el.remove(),2800)}
