@@ -203,7 +203,7 @@ function inspectorPanels(p) {
       <div class="property-list"><label>Video nguồn <b>${p.input_paths?.length||0} file</b></label>
       <label>Đầu ra <b>${esc(p.output_path||"Chưa chọn")}</b></label>
       <label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label><label>Giai đoạn <b>${esc(p.job_stage||"—")}</b></label><label>Đang làm <b>${esc(p.current_step||"—")}</b></label><label>Video hiện tại <b>${esc(videoProgressText(p))}</b></label></div>
-      <div class="batch-results-card"><b>Kết quả từng video</b>${batchResultPanel()}</div>
+      <div class="batch-results-card"><div class="batch-results-head"><b>Kết quả từng video</b><button type="button" onclick="retryFailedVideos()">Retry lỗi</button></div>${batchResultPanel()}</div>
       <button class="button full" onclick="editProject()">Chỉnh file và đầu ra</button>
     </section>
     <section class="inspector-panel" data-tool-panel="concat"><span class="eyebrow">NỐI VIDEO DÀI</span><h3>Thiết lập xuất</h3>
@@ -287,31 +287,53 @@ async function cancelJob() {
   } catch(error) { toast(error.message); }
 }
 
+function currentTimelinePaths() {
+  return [...(project.settings?.timeline_paths||[])];
+}
+
+function batchOptions(extra={}) {
+  return {
+    timeline_paths: currentTimelinePaths(),
+    enable_ai_voice:$("#batch-ai-voice")?.checked ?? true,
+    remove_background:$("#batch-remove-bg")?.checked ?? true,
+    segment_seconds:+($("#batch-seconds")?.value || 5),
+    odd_zoom_percent:+($("#batch-odd-zoom")?.value || 100),
+    even_zoom_percent:+($("#batch-even-zoom")?.value || 110),
+    zoom_mode:$("#batch-zoom-mode")?.value || "center",
+    pos_x:+($("#batch-pos-x")?.value || 0),
+    pos_y:+($("#batch-pos-y")?.value || 0),
+    crf:$("#batch-crf")?.value || "20",
+    bitrate:$("#batch-bitrate")?.value || "auto",
+    final_concat_mode:$("#batch-final-mode")?.value || "fast",
+    resume_enabled:$("#batch-resume")?.checked ?? true,
+    retry_failed_only:$("#batch-retry-failed")?.checked ?? false,
+    ...extra,
+  };
+}
+
+async function retryFailedVideos() {
+  const failedCount=batchResults.filter(item=>item.status==="error").length;
+  if(!failedCount){toast("Chưa có video lỗi để retry");return;}
+  const options=batchOptions({retry_failed_only:true});
+  if(!options.timeline_paths.length){toast("Hãy kéo video từ thư viện xuống timeline trước");return;}
+  try {
+    const result=await api(`/api/projects/${project.id}/run`, {method:"POST", body:JSON.stringify({operation:"batch_voice_cut_zoom", options})});
+    toast(result.message);
+    await refreshProject();
+  } catch(error) { toast(error.message); }
+}
+
 async function runTool(operation) {
   let actual=operation, options={};
   if(operation==="concat") options={safe_mode:$("#concat-safe").checked,format:$("#concat-format").value};
-  options.timeline_paths=[...(project.settings?.timeline_paths||[])];
+  options.timeline_paths=currentTimelinePaths();
   if(!options.timeline_paths.length){toast("Hãy kéo video từ thư viện xuống timeline trước");return}
   if(operation==="split") options={segment_seconds:+$("#split-seconds").value,accurate:$("#split-accurate").checked};
   if(operation==="zoom") options={zoom_percent:+$("#zoom-percent").value,pos_x:+$("#zoom-x").value,pos_y:+$("#zoom-y").value};
   if(operation==="audio"){actual=$("#audio-mode").value;options={audio_format:$("#audio-format").value}}
   if(operation==="batch"){
     actual="batch_voice_cut_zoom";
-    options={
-      enable_ai_voice:$("#batch-ai-voice").checked,
-      remove_background:$("#batch-remove-bg").checked,
-      segment_seconds:+$("#batch-seconds").value,
-      odd_zoom_percent:+$("#batch-odd-zoom").value,
-      even_zoom_percent:+$("#batch-even-zoom").value,
-      zoom_mode:$("#batch-zoom-mode").value,
-      pos_x:+$("#batch-pos-x").value,
-      pos_y:+$("#batch-pos-y").value,
-      crf:$("#batch-crf").value,
-      bitrate:$("#batch-bitrate").value || "auto",
-      final_concat_mode:$("#batch-final-mode").value,
-      resume_enabled:$("#batch-resume").checked,
-      retry_failed_only:$("#batch-retry-failed").checked,
-    };
+    options=batchOptions();
   }
   if(operation==="effects"){options={effects:$$(`[data-effect].active`).map(button=>button.dataset.effect)};if(!options.effects.length){toast("Hãy chọn ít nhất một hiệu ứng");return}}
   try {
