@@ -103,9 +103,20 @@ function render() {
           <button class="button" onclick="openFinalVideo()">Mở final</button>
           <button class="button" onclick="editProject()">Cài đặt dự án</button>
           ${p.status === "Đang chạy" ? `<button class="button danger" onclick="cancelJob()">Dừng / Hủy</button>` : ""}
-          <button class="button primary" onclick="selectTool('concat')">Xuất video</button>
+          <button class="button primary" onclick="runQuickBatch()">Chạy nhanh</button>
         </div>
       </header>
+      <section class="project-operator-bar">
+        <div class="operator-summary">
+          <b>Dùng nhanh</b>
+          <small>Import video → Thêm tất cả vào timeline → Chạy nhanh</small>
+        </div>
+        <div class="operator-actions">
+          <button class="button" onclick="chooseVideos()">Import video</button>
+          <button class="button" onclick="addAllMediaToTimeline()">Thêm tất cả vào timeline</button>
+          <button class="button primary" onclick="runQuickBatch()">Chạy nhanh</button>
+        </div>
+      </section>
       <div class="editor-main">
         <nav class="editor-rail">
           <button class="active" data-editor-tool="media" onclick="selectTool('media')"><span>▦</span>Media</button>
@@ -120,6 +131,10 @@ function render() {
           <div class="browser-head">
             <div><small>THƯ VIỆN</small><h3>Media dự án</h3></div>
             <button onclick="chooseVideos()" title="Import nhiều video">＋</button>
+          </div>
+          <div class="media-dropzone" onclick="chooseVideos()">
+            <b>Thêm video vào dự án</b>
+            <small>Bấm để chọn nhiều file hoặc kéo thả vào đây</small>
           </div>
           <div class="browser-tabs"><button class="active">Cục bộ</button><button>Đã dùng</button></div>
           <label class="asset-search">⌕ <input id="asset-query" placeholder="Tìm video..."></label>
@@ -202,9 +217,22 @@ function inspectorPanels(p) {
   return `
     <section class="inspector-panel active" data-tool-panel="media">
       <span class="eyebrow">THÔNG TIN DỰ ÁN</span><h3>${esc(p.name)}</h3>
+      <div class="quick-metrics">
+        <div><b>${p.input_paths?.length||0}</b><small>Video nguồn</small></div>
+        <div><b>${timelinePaths.length||0}</b><small>Clip timeline</small></div>
+        <div><b>${p.progress||0}%</b><small>Tiến trình</small></div>
+      </div>
       <div class="property-list"><label>Video nguồn <b>${p.input_paths?.length||0} file</b></label>
       <label>Đầu ra <b>${esc(p.output_path||"Chưa chọn")}</b></label>
       <label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label><label>Giai đoạn <b>${esc(p.job_stage||"—")}</b></label><label>Đang làm <b>${esc(p.current_step||"—")}</b></label><label>Encoder <b>${esc(p.current_encoder||"—")}</b></label><label>Video hiện tại <b>${esc(videoProgressText(p))}</b></label></div>
+      <div class="quick-launch-card">
+        <b>Thao tác nhanh</b>
+        <div class="quick-launch-actions">
+          <button type="button" class="button" onclick="chooseVideos()">Import video</button>
+          <button type="button" class="button" onclick="addAllMediaToTimeline()">Thêm tất cả</button>
+          <button type="button" class="button primary" onclick="runQuickBatch()">Chạy nhanh</button>
+        </div>
+      </div>
       <div class="batch-results-card"><div class="batch-results-head"><b>Kết quả từng video</b><button type="button" onclick="retryFailedVideos()">Retry lỗi</button></div>${batchResultPanel()}</div>
       <button class="button full" onclick="editProject()">Chỉnh file và đầu ra</button>
     </section>
@@ -427,15 +455,25 @@ async function addToTimeline(mediaIndex,insertAt) {
   paths.splice(at,0,project.input_paths[mediaIndex]);selectedTimelineIndex=at;selectedMediaIndex=mediaIndex;
   await saveTimeline(paths,"Đã thêm clip vào timeline");
 }
-async function addAllMediaToTimeline() {
+async function syncAllMediaToTimeline(showToast=true) {
   const paths=[...(project.input_paths||[])];
-  if(!paths.length){toast("Chưa có video. Hãy bấm Import nhiều video trước");return;}
-  selectedTimelineIndex=0;selectedMediaIndex=0;
-  await saveTimeline(paths,"Đã thêm tất cả video vào timeline");
+  if(!paths.length){if(showToast)toast("Chưa có video. Hãy bấm Import nhiều video trước");return false;}
+  const settings={...(project.settings||{}),timeline_paths:paths};
+  await api(`/api/projects/${project.id}`,{method:"PATCH",body:JSON.stringify({settings})});
+  project.settings=settings;selectedTimelineIndex=0;selectedMediaIndex=0;render();
+  if(showToast)toast("Đã thêm tất cả video vào timeline");
+  return true;
+}
+async function addAllMediaToTimeline() {
+  await syncAllMediaToTimeline(true);
 }
 async function runQuickBatch() {
   if(!(project.input_paths||[]).length){toast("Chưa có video. Hãy bấm Import nhiều video trước");return;}
-  if(!(project.settings?.timeline_paths||[]).length)await addAllMediaToTimeline();
+  if(!(project.settings?.timeline_paths||[]).length){
+    const ok=await syncAllMediaToTimeline(false);
+    if(!ok)return;
+  }
+  selectTool('batch');
   await runTool('batch');
 }
 async function moveTimelineClip(from,to) {
@@ -597,8 +635,10 @@ async function uploadFiles(files) {
       });
       completed++;
     }
-    toast(`Đã import ${files.length} video theo đúng thứ tự`);
-    await refreshProject();
+    await refreshProject(false);
+    await syncAllMediaToTimeline(false);
+    selectTool('batch');
+    toast(`Đã import ${files.length} video và đưa vào timeline`);
   } catch(error) {
     toast(`Import lỗi: ${error.message}`);
   }
@@ -638,14 +678,14 @@ function filterAssets(event) {
   const query=event.target.value.toLocaleLowerCase("vi");
   $$(".media-asset").forEach(item => item.classList.toggle("hidden", !item.textContent.toLocaleLowerCase("vi").includes(query)));
 }
-async function refreshProject() {
+async function refreshProject(doRender=true) {
   const payload=await api("/api/projects");
   const updated=payload.projects.find(item=>item.id===projectId);
   if(updated){
     project=updated;
     try { batchResults = (await api(`/api/projects/${project.id}/batch-results`)).results || []; }
     catch { batchResults = []; }
-    render();
+    if(doRender)render();
   }
 }
 function fileName(path){return String(path).split(/[\\/]/).pop()}
