@@ -208,13 +208,13 @@ def _prepare_voice_track(
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
-) -> Path | None:
+) -> tuple[Path | None, str]:
     original_audio = audio_dir / "original_audio.wav"
     voice_wav = audio_dir / "voice.wav"
 
     if _usable_file(voice_wav):
         emit_log(f"Resume: dùng lại voice.wav đã có cho {src.name}.")
-        return voice_wav
+        return voice_wav, "resume_voice_wav"
 
     if not _usable_file(original_audio):
         emit_log("Trích xuất original_audio.wav từ video nguồn...")
@@ -228,7 +228,7 @@ def _prepare_voice_track(
             emit_log(f"Cảnh báo: original_audio.wav có lỗi decode một phần (exit {rc}) nhưng file đã được tạo, vẫn tiếp tục dùng.")
         elif rc != 0:
             emit_log(f"Cảnh báo: không xuất được original_audio.wav (exit {rc}).")
-            return None
+            return None, "no_audio"
 
     vocal_audio: Path | None = None
     if enable_ai_voice or remove_background:
@@ -241,8 +241,11 @@ def _prepare_voice_track(
         )
 
     source_audio = vocal_audio if vocal_audio and vocal_audio.is_file() else original_audio
+    ai_voice_status = "ai_vocals" if source_audio != original_audio else "original_audio_fallback"
     if source_audio == original_audio:
         emit_log("Không dùng AI voice hoặc AI không khả dụng: dùng audio gốc làm voice tham chiếu.")
+    else:
+        emit_log("AI voice OK: dùng vocals đã tách để ghép final.")
     rc = _run(
         [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(source_audio), "-ac", "2", "-ar", "44100", str(voice_wav)],
         emit_log=emit_log,
@@ -251,8 +254,8 @@ def _prepare_voice_track(
     )
     if rc != 0:
         emit_log(f"Cảnh báo: không xuất được voice.wav (exit {rc}).")
-        return None
-    return voice_wav
+        return None, "voice_export_failed"
+    return voice_wav, ai_voice_status
 
 
 def _split_exact_segments(
@@ -536,6 +539,12 @@ def process_voice_split_alternate_zoom_batch(
     root.mkdir(parents=True, exist_ok=True)
     ok_count = 0
     errors: list[str] = []
+
+    def report_video_progress(video_index: int, fraction: float) -> None:
+        total = max(1, len(paths))
+        overall = ((video_index - 1) + max(0.0, min(1.0, fraction))) / total
+        emit_progress(max(1, min(95, int(overall * 100))))
+
     for video_index, src in enumerate(paths, 1):
         if stop_check():
             return False, "Đã dừng theo yêu cầu."
@@ -584,7 +593,8 @@ def process_voice_split_alternate_zoom_batch(
 
             emit_status({"current_step": "Tách voice / chuẩn bị audio"})
             _write_video_state(state_path, {"status": "running", "step": "Tách voice / chuẩn bị audio"})
-            voice_path = _prepare_voice_track(
+            report_video_progress(video_index, 0.03)
+            voice_path, ai_voice_status = _prepare_voice_track(
                 src,
                 audio_dir,
                 ffmpeg_path,
@@ -598,7 +608,8 @@ def process_voice_split_alternate_zoom_batch(
                 video_log(f"Đã có voice.wav: {voice_path}")
 
             emit_status({"current_step": "Cắt đoạn video không audio"})
-            _write_video_state(state_path, {"status": "running", "step": "Cắt đoạn video không audio", "voice_path": str(voice_path) if voice_path else ""})
+            _write_video_state(state_path, {"status": "running", "step": "Cắt đoạn video không audio", "voice_path": str(voice_path) if voice_path else "", "ai_voice_status": ai_voice_status})
+            report_video_progress(video_index, 0.12)
             if video_encoder_mode == "auto":
                 video_log("Encode mode auto: ưu tiên NVIDIA NVENC, lỗi sẽ tự fallback CPU.")
                 video_encoder_mode = "nvidia"
@@ -624,6 +635,8 @@ def process_voice_split_alternate_zoom_batch(
                 active_processes=active_processes,
             )
 
+            report_video_progress(video_index, 0.40)
+
             final_segments: list[Path] = []
             emit_status({"current_step": "Zoom xen kẽ từng đoạn"})
             _write_video_state(state_path, {"status": "running", "step": "Zoom xen kẽ từng đoạn", "raw_segments": len(raw_segments)})
@@ -647,10 +660,13 @@ def process_voice_split_alternate_zoom_batch(
                     active_processes=active_processes,
                 )
                 final_segments.append(out)
+                if raw_segments:
+                    report_video_progress(video_index, 0.40 + 0.35 * idx / len(raw_segments))
 
             final_path = video_dir / "final.mp4"
             emit_status({"current_step": "Ghép final.mp4"})
             _write_video_state(state_path, {"status": "running", "step": "Ghép final.mp4", "parts": len(final_segments), "final_path": str(final_path)})
+            report_video_progress(video_index, 0.78)
             try:
                 _concat_segments(
                     final_segments,
@@ -736,6 +752,7 @@ def process_voice_split_alternate_zoom_batch(
                 else:
                     raise
 
+            report_video_progress(video_index, 0.90)
             _pad_final_duration(
                 src,
                 final_path,
@@ -753,13 +770,14 @@ def process_voice_split_alternate_zoom_batch(
             emit_status({"current_step": "Kiểm tra final.mp4"})
             _write_video_state(state_path, {"status": "running", "step": "Kiểm tra final.mp4"})
             _validate_final_output(src, final_path, ffprobe_path, emit_log=video_log)
+            report_video_progress(video_index, 0.98)
             ok_count += 1
             emit_status({
                 "current_step": "Hoàn thành video",
                 "processed_videos": video_index,
                 "current_video": src.name,
             })
-            _write_video_state(state_path, {"status": "success", "step": "Hoàn thành", "final_path": str(final_path), "parts": len(final_segments), "encoder_mode": video_encoder_mode, "encoder_label": encoder_label})
+            _write_video_state(state_path, {"status": "success", "step": "Hoàn thành", "final_path": str(final_path), "parts": len(final_segments), "encoder_mode": video_encoder_mode, "encoder_label": encoder_label, "ai_voice_status": ai_voice_status})
             video_log(f"Hoàn thành {src.name}: {final_path}")
         except Exception as exc:
             message = f"Lỗi {src.name}: {exc}"

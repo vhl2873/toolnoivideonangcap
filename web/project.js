@@ -200,11 +200,21 @@ function render() {
   });
 }
 
+function aiVoiceLabel(status) {
+  const labels={
+    ai_vocals:"AI voice OK",
+    original_audio_fallback:"Dùng audio gốc",
+    resume_voice_wav:"Dùng lại voice.wav",
+    no_audio:"Không có audio",
+    voice_export_failed:"Lỗi xuất voice",
+  };
+  return labels[status] || "";
+}
 function batchResultPanel() {
   if(!batchResults.length)return `<div class="batch-results-empty">Chưa có kết quả batch.</div>`;
   return `<div class="batch-results-list">${batchResults.map(item=>`
     <div class="batch-result ${esc(item.status)}">
-      <div><b>${esc(item.name)}</b><small>${esc(item.step||item.status)}${item.encoder_label?` • ${esc(item.encoder_label)}`:""}${item.error?` • ${esc(item.error)}`:""}</small></div>
+      <div><b>${esc(item.name)}</b><small>${esc(item.step||item.status)}${item.parts?` • ${item.parts} part`:""}${item.encoder_label?` • ${esc(item.encoder_label)}`:""}${aiVoiceLabel(item.ai_voice_status)?` • ${esc(aiVoiceLabel(item.ai_voice_status))}`:""}${item.error?` • ${esc(item.error)}`:""}</small></div>
       <span class="batch-status">${esc(item.status)}</span>
       <button type="button" onclick="openBatchResult(${item.index},'folder')" ${item.folder_path?"":"disabled"}>Folder</button>
       <button type="button" onclick="openBatchResult(${item.index},'final')" ${item.final_path?"":"disabled"}>Final</button>

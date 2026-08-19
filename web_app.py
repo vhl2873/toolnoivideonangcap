@@ -262,6 +262,7 @@ def _batch_results_for_project(project: dict) -> list[dict]:
             "parts": parts,
             "encoder_mode": encoder_mode,
             "encoder_label": encoder_label,
+            "ai_voice_status": str(state.get("ai_voice_status", "")),
             "folder_path": str(video_dir) if video_dir and video_dir.is_dir() else "",
             "final_path": str(final_path) if final_path and final_path.is_file() else "",
             "log_path": str(process_log) if process_log and process_log.is_file() else "",
