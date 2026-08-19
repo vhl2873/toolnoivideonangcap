@@ -230,21 +230,39 @@ function inspectorPanels(p) {
       <div class="info-callout">AI cần cài Demucs. Trích xuất thường dùng FFmpeg.</div>
       <button class="button primary full" onclick="runTool('audio')">Bắt đầu tách âm thanh</button>
     </section>
-    <section class="inspector-panel" data-tool-panel="batch"><span class="eyebrow">PIPELINE HÀNG LOẠT</span><h3>Voice → Cắt đoạn → Zoom so le</h3>
+    <section class="inspector-panel" data-tool-panel="batch"><span class="eyebrow">PIPELINE HÀNG LOẠT</span><h3>Nạp video và bấm chạy</h3>
+      <div class="quick-start-card">
+        <b>Cách dùng nhanh</b>
+        <ol>
+          <li>Bấm <b>Import nhiều video</b></li>
+          <li>Bấm <b>Thêm tất cả vào timeline</b></li>
+          <li>Bấm <b>Chạy nhanh</b></li>
+        </ol>
+        <div class="quick-start-actions">
+          <button type="button" class="button" onclick="chooseVideos()">Import nhiều video</button>
+          <button type="button" class="button" onclick="addAllMediaToTimeline()">Thêm tất cả vào timeline</button>
+          <button type="button" class="button primary" onclick="runQuickBatch()">Chạy nhanh</button>
+        </div>
+      </div>
       <label class="check"><input id="batch-ai-voice" type="checkbox" checked> Tách voice khỏi nhạc nền bằng AI</label>
       <label class="check"><input id="batch-remove-bg" type="checkbox" checked> Xóa nhạc nền, giữ giọng nói chính</label>
       <label>Thời lượng mỗi Part<div class="input-unit"><input id="batch-seconds" type="number" min="3" step="0.5" value="5"><span>phút</span></div></label>
       <div class="xy-grid"><label>Zoom đoạn lẻ %<input id="batch-odd-zoom" type="number" min="25" max="300" value="100"></label><label>Zoom đoạn chẵn %<input id="batch-even-zoom" type="number" min="25" max="300" value="110"></label></div>
-      <label>Kiểu zoom<select id="batch-zoom-mode"><option value="center">Cắt vào tâm hình</option><option value="custom">Tùy chỉnh vị trí</option></select></label>
-      <div class="xy-grid"><label>Vị trí X<input id="batch-pos-x" type="number" value="0"></label><label>Vị trí Y<input id="batch-pos-y" type="number" value="0"></label></div>
-      <label>Chất lượng CRF<input id="batch-crf" type="number" min="12" max="35" value="20"></label>
-      <label>Bitrate video<input id="batch-bitrate" placeholder="auto hoặc 8M" value="auto"></label>
-      <label>Ghép final<select id="batch-final-mode"><option value="fast">Nhanh - stream copy</option><option value="safe">An toàn - re-encode final</option></select></label>
-      <label>Encode video<select id="batch-encoder-mode"><option value="auto">Auto - ưu tiên NVIDIA, lỗi thì về CPU</option><option value="nvidia">NVIDIA NVENC</option><option value="cpu">CPU libx264</option></select></label>
-      <label>Preset NVENC<select id="batch-encoder-preset"><option value="p3">Nhanh hơn (p3)</option><option value="p4" selected>Cân bằng (p4)</option><option value="p5">Đẹp hơn (p5)</option><option value="p6">Rất đẹp (p6)</option></select></label>
-      <label class="check"><input id="batch-resume" type="checkbox" checked> Tiếp tục từ file đã xử lý nếu chạy lại</label>
-      <label class="check"><input id="batch-retry-failed" type="checkbox"> Chỉ chạy lại các video đang lỗi</label>
-      <div class="info-callout">Output mỗi video: audio/voice.wav, parts/part_001.mp4..., final.mp4. Audio được xử lý nguyên track rồi ghép lại cuối để giảm lệch sync.</div>
+      <details class="advanced-batch-options">
+        <summary>Tùy chọn nâng cao</summary>
+        <div class="advanced-batch-body">
+          <label>Kiểu zoom<select id="batch-zoom-mode"><option value="center">Cắt vào tâm hình</option><option value="custom">Tùy chỉnh vị trí</option></select></label>
+          <div class="xy-grid"><label>Vị trí X<input id="batch-pos-x" type="number" value="0"></label><label>Vị trí Y<input id="batch-pos-y" type="number" value="0"></label></div>
+          <label>Chất lượng CRF<input id="batch-crf" type="number" min="12" max="35" value="20"></label>
+          <label>Bitrate video<input id="batch-bitrate" placeholder="auto hoặc 8M" value="auto"></label>
+          <label>Ghép final<select id="batch-final-mode"><option value="fast">Nhanh - stream copy</option><option value="safe">An toàn - re-encode final</option></select></label>
+          <label>Encode video<select id="batch-encoder-mode"><option value="auto">Auto - ưu tiên NVIDIA, lỗi thì về CPU</option><option value="nvidia">NVIDIA NVENC</option><option value="cpu">CPU libx264</option></select></label>
+          <label>Preset NVENC<select id="batch-encoder-preset"><option value="p3">Nhanh hơn (p3)</option><option value="p4" selected>Cân bằng (p4)</option><option value="p5">Đẹp hơn (p5)</option><option value="p6">Rất đẹp (p6)</option></select></label>
+          <label class="check"><input id="batch-resume" type="checkbox" checked> Tiếp tục từ file đã xử lý nếu chạy lại</label>
+          <label class="check"><input id="batch-retry-failed" type="checkbox"> Chỉ chạy lại các video đang lỗi</label>
+        </div>
+      </details>
+      <div class="info-callout">Mặc định tool sẽ xử lý theo kiểu dễ dùng: tách voice, cắt theo phút, zoom so le rồi nối lại. Nếu không cần chỉnh sâu thì chỉ việc import video và bấm Chạy nhanh.</div>
       <button class="button primary full" onclick="runTool('batch')">Chạy pipeline hàng loạt</button>
     </section>
     <section class="inspector-panel" data-tool-panel="effects"><span class="eyebrow">HIỆU ỨNG</span><h3>Hiệu ứng nhanh</h3>
@@ -408,6 +426,17 @@ async function addToTimeline(mediaIndex,insertAt) {
   const at=Math.max(0,Math.min(paths.length,Number.isInteger(insertAt)?insertAt:paths.length));
   paths.splice(at,0,project.input_paths[mediaIndex]);selectedTimelineIndex=at;selectedMediaIndex=mediaIndex;
   await saveTimeline(paths,"Đã thêm clip vào timeline");
+}
+async function addAllMediaToTimeline() {
+  const paths=[...(project.input_paths||[])];
+  if(!paths.length){toast("Chưa có video. Hãy bấm Import nhiều video trước");return;}
+  selectedTimelineIndex=0;selectedMediaIndex=0;
+  await saveTimeline(paths,"Đã thêm tất cả video vào timeline");
+}
+async function runQuickBatch() {
+  if(!(project.input_paths||[]).length){toast("Chưa có video. Hãy bấm Import nhiều video trước");return;}
+  if(!(project.settings?.timeline_paths||[]).length)await addAllMediaToTimeline();
+  await runTool('batch');
 }
 async function moveTimelineClip(from,to) {
   const paths=[...(project.settings?.timeline_paths||[])];

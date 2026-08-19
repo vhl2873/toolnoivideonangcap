@@ -188,3 +188,11 @@ body:not(.project-page-body) #project-dialog{background:linear-gradient(160deg,#
 .batch-results-card{display:grid;gap:10px;padding:12px;border:1px solid #223a56;border-radius:10px;background:#0b1521}.batch-results-card>b{font-size:12px;color:#dbe8f7}.batch-results-empty{font-size:11px;color:#7f95b0}.batch-results-list{display:grid;gap:8px}.batch-result{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:8px;align-items:center;padding:9px;border:1px solid #20344d;border-radius:8px;background:#0a121d}.batch-result b,.batch-result small{display:block}.batch-result b{font-size:11px;color:#e6eef8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.batch-result small{font-size:10px;color:#8397b0;line-height:1.35}.batch-status{font-size:10px;font-weight:800;text-transform:uppercase;color:#b9c9dc}.batch-result button{height:28px;padding:0 9px;border:1px solid #304764;border-radius:7px;background:#15253a;color:var(--text);font-size:11px;cursor:pointer}.batch-result button:disabled{opacity:.45;cursor:not-allowed}.batch-result.success{border-color:#245845}.batch-result.error{border-color:#62323d}.batch-result.running{border-color:#30558a}.batch-result.not_run{border-color:#334760}
 
 .batch-results-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.batch-results-head button{height:30px;padding:0 10px;border:1px solid #6f4f1f;border-radius:7px;background:#39270f;color:#ffd89b;font-size:11px;font-weight:700;cursor:pointer}
+.quick-start-card{display:grid;gap:10px;padding:12px;border:1px solid #2a4a6d;border-radius:10px;background:linear-gradient(135deg,#11243a,#0c1827)}
+.quick-start-card b{font-size:13px;color:#e9f2ff}
+.quick-start-card ol{margin:0;padding-left:18px;color:#9db2cb;font-size:11px;line-height:1.6}
+.quick-start-actions{display:grid;grid-template-columns:1fr;gap:8px}
+.advanced-batch-options{border:1px solid #233a56;border-radius:9px;background:#0c1521;padding:10px}
+.advanced-batch-options summary{cursor:pointer;color:#cfe0f5;font-size:12px;font-weight:700;list-style:none}
+.advanced-batch-options summary::-webkit-details-marker{display:none}
+.advanced-batch-body{display:grid;gap:14px;margin-top:12px}
