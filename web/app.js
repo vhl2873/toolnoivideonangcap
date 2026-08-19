@@ -66,6 +66,7 @@ function filteredProjects() {
 }
 
 function render() {
+  renderOverviewQuickStart();
   renderStats();
   renderProjects();
   renderSecondaryPages();
@@ -74,6 +75,27 @@ function render() {
   const running = state.projects.filter(p=>p.status==="Đang chạy").length;
   $("#queue-stat").textContent = `Hàng đợi: ${queued}`;
   $("#running-stat").textContent = `Đang chạy: ${running}`;
+}
+
+function renderOverviewQuickStart() {
+  const recent = [...state.projects].sort((a,b)=>(b.updated_at||b.created_at||"").localeCompare(a.updated_at||a.created_at||"")).slice(0,3);
+  $("#overview-quickstart").innerHTML = `
+    <section class="operator-hero panel">
+      <div>
+        <span class="eyebrow">QUY TRÌNH DỄ DÙNG</span>
+        <h2>Nạp video → chọn Batch AI → bấm Chạy nhanh</h2>
+        <p>Giao diện này ưu tiên xử lý hàng loạt: tách/xóa nhạc nền, cắt Part theo phút, zoom so le và nối lại thành final.mp4.</p>
+        <div class="hero-actions">
+          <button class="button primary" onclick="openNewProject()">＋ Tạo dự án mới</button>
+          ${recent[0]?`<button class="button" onclick="openProjectWorkspace('${recent[0].id}')">Mở dự án gần nhất</button>`:""}
+        </div>
+      </div>
+      <ol class="usage-steps">
+        <li><b>1</b><span><strong>Tạo dự án</strong><small>Chỉ cần nhập tên, sau đó vào màn hình xử lý.</small></span></li>
+        <li><b>2</b><span><strong>Import video</strong><small>Chọn một hoặc nhiều file trong máy.</small></span></li>
+        <li><b>3</b><span><strong>Chạy nhanh</strong><small>Tool tự thêm timeline và chạy pipeline mặc định.</small></span></li>
+      </ol>
+    </section>`;
 }
 
 function renderStats() {
@@ -387,9 +409,9 @@ function openProjectDialog(project=null) {
   const creating=!project;
   form.classList.toggle("simple-create",creating);
   $("#project-dialog").classList.toggle("simple-dialog",creating);
-  $("#dialog-title").textContent=creating?"Đặt tên dự án":"Chỉnh sửa dự án";
+  $("#dialog-title").textContent=creating?"Tạo dự án xử lý video":"Chỉnh sửa dự án";
   $("#project-dialog .eyebrow").textContent=creating?"DỰ ÁN MỚI":"CẤU HÌNH DỰ ÁN";
-  $("#project-submit").textContent=creating?"Tạo dự án":"Lưu thay đổi";
+  $("#project-submit").textContent=creating?"Tạo và nạp video":"Lưu thay đổi";
   form.elements.id.value=project?.id||"";
   form.elements.name.value=project?.name||"";
   form.elements.task_type.innerHTML=optionList(TASKS,project?.task_type||TASKS[0]);
@@ -424,7 +446,7 @@ async function submitProject(event) {
     name:form.elements.name.value,task_type:form.elements.task_type.value,
     priority:form.elements.priority.value,input_paths:form.elements.input_paths.value.split("\n").map(v=>v.trim()).filter(Boolean),
     output_path:form.elements.output_path.value,settings:taskSettingsFromForm(form)
-  } : {name:form.elements.name.value};
+  } : {name:form.elements.name.value, task_type:"Batch voice + cut + zoom", priority:"Bình thường"};
   try {
     if(id) await api(`/api/projects/${id}`,{method:"PATCH",body:JSON.stringify(payload)});
     else {
