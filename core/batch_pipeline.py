@@ -556,6 +556,9 @@ def process_voice_split_alternate_zoom_batch(
                 video_encoder_mode = "nvidia"
             else:
                 video_log(f"Encode mode: {video_encoder_mode}")
+            encoder_label = "GPU NVIDIA NVENC" if video_encoder_mode == "nvidia" else "CPU libx264"
+            emit_status({"current_encoder": encoder_label})
+            _write_video_state(state_path, {"encoder_mode": video_encoder_mode, "encoder_label": encoder_label})
 
             raw_segments = _split_exact_segments(
                 src,
@@ -616,6 +619,9 @@ def process_voice_split_alternate_zoom_batch(
                 if encoder_mode == "auto" and video_encoder_mode == "nvidia":
                     video_log(f"NVENC lỗi, fallback CPU: {exc}")
                     video_encoder_mode = "cpu"
+                    encoder_label = "CPU libx264"
+                    emit_status({"current_encoder": encoder_label})
+                    _write_video_state(state_path, {"encoder_mode": video_encoder_mode, "encoder_label": encoder_label})
                     raw_segments = _split_exact_segments(
                         src,
                         raw_segments_dir,
@@ -685,7 +691,7 @@ def process_voice_split_alternate_zoom_batch(
                 "processed_videos": video_index,
                 "current_video": src.name,
             })
-            _write_video_state(state_path, {"status": "success", "step": "Hoàn thành", "final_path": str(final_path), "parts": len(final_segments)})
+            _write_video_state(state_path, {"status": "success", "step": "Hoàn thành", "final_path": str(final_path), "parts": len(final_segments), "encoder_mode": video_encoder_mode, "encoder_label": encoder_label})
             video_log(f"Hoàn thành {src.name}: {final_path}")
         except Exception as exc:
             message = f"Lỗi {src.name}: {exc}"

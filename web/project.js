@@ -189,7 +189,7 @@ function batchResultPanel() {
   if(!batchResults.length)return `<div class="batch-results-empty">Chưa có kết quả batch.</div>`;
   return `<div class="batch-results-list">${batchResults.map(item=>`
     <div class="batch-result ${esc(item.status)}">
-      <div><b>${esc(item.name)}</b><small>${esc(item.step||item.status)}${item.error?` • ${esc(item.error)}`:""}</small></div>
+      <div><b>${esc(item.name)}</b><small>${esc(item.step||item.status)}${item.encoder_label?` • ${esc(item.encoder_label)}`:""}${item.error?` • ${esc(item.error)}`:""}</small></div>
       <span class="batch-status">${esc(item.status)}</span>
       <button type="button" onclick="openBatchResult(${item.index},'folder')" ${item.folder_path?"":"disabled"}>Folder</button>
       <button type="button" onclick="openBatchResult(${item.index},'final')" ${item.final_path?"":"disabled"}>Final</button>
@@ -204,7 +204,7 @@ function inspectorPanels(p) {
       <span class="eyebrow">THÔNG TIN DỰ ÁN</span><h3>${esc(p.name)}</h3>
       <div class="property-list"><label>Video nguồn <b>${p.input_paths?.length||0} file</b></label>
       <label>Đầu ra <b>${esc(p.output_path||"Chưa chọn")}</b></label>
-      <label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label><label>Giai đoạn <b>${esc(p.job_stage||"—")}</b></label><label>Đang làm <b>${esc(p.current_step||"—")}</b></label><label>Video hiện tại <b>${esc(videoProgressText(p))}</b></label></div>
+      <label>Ưu tiên <b>${esc(p.priority)}</b></label><label>Tiến trình <b>${p.progress||0}%</b></label><label>Giai đoạn <b>${esc(p.job_stage||"—")}</b></label><label>Đang làm <b>${esc(p.current_step||"—")}</b></label><label>Encoder <b>${esc(p.current_encoder||"—")}</b></label><label>Video hiện tại <b>${esc(videoProgressText(p))}</b></label></div>
       <div class="batch-results-card"><div class="batch-results-head"><b>Kết quả từng video</b><button type="button" onclick="retryFailedVideos()">Retry lỗi</button></div>${batchResultPanel()}</div>
       <button class="button full" onclick="editProject()">Chỉnh file và đầu ra</button>
     </section>
