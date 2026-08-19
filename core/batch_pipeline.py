@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -37,6 +39,28 @@ def _validate_final_output(
     )
     if duration_diff > 0.1:
         emit_log("Cảnh báo: duration final lệch quá 0.1s so với source.")
+
+
+def _append_process_log(log_path: Path, message: str) -> None:
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"[{timestamp}] {message}\n")
+
+
+def _write_video_state(state_path: Path, payload: dict) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    current = {}
+    if state_path.exists():
+        try:
+            current = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current = {}
+    current.update(payload)
+    current["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    temp_path = state_path.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(state_path)
 
 
 def _usable_file(path: str | Path) -> bool:
@@ -421,7 +445,25 @@ def process_voice_split_alternate_zoom_batch(
         video_dir.mkdir(parents=True, exist_ok=True)
         raw_segments_dir = video_dir / "_raw_segments"
         raw_segments_dir.mkdir(parents=True, exist_ok=True)
-        emit_log(f"===== Xử lý video {video_index}/{len(paths)}: {src.name} =====")
+        process_log_path = video_dir / "process.log"
+        state_path = video_dir / "project_state.json"
+
+        _append_process_log(process_log_path, f"===== Xử lý video {video_index}/{len(paths)}: {src.name} =====")
+        _write_video_state(state_path, {
+            "source": str(src),
+            "video_name": src.name,
+            "status": "running",
+            "step": "Chuẩn bị video",
+            "processed_videos": max(0, video_index - 1),
+            "total_videos": len(paths),
+            "video_dir": str(video_dir),
+        })
+
+        def video_log(message: str) -> None:
+            emit_log(message)
+            _append_process_log(process_log_path, message)
+
+        video_log(f"===== Xử lý video {video_index}/{len(paths)}: {src.name} =====")
         emit_status({
             "job_stage": "Đang xử lý batch",
             "current_video": src.name,
@@ -434,20 +476,24 @@ def process_voice_split_alternate_zoom_batch(
             parts_dir = video_dir / "parts"
             audio_dir.mkdir(parents=True, exist_ok=True)
             parts_dir.mkdir(parents=True, exist_ok=True)
+
             emit_status({"current_step": "Tách voice / chuẩn bị audio"})
+            _write_video_state(state_path, {"status": "running", "step": "Tách voice / chuẩn bị audio"})
             voice_path = _prepare_voice_track(
                 src,
                 audio_dir,
                 ffmpeg_path,
                 enable_ai_voice=enable_ai_voice,
                 remove_background=remove_background,
-                emit_log=emit_log,
+                emit_log=video_log,
                 stop_check=stop_check,
                 active_processes=active_processes,
             )
             if voice_path:
-                emit_log(f"Đã có voice.wav: {voice_path}")
+                video_log(f"Đã có voice.wav: {voice_path}")
+
             emit_status({"current_step": "Cắt đoạn video không audio"})
+            _write_video_state(state_path, {"status": "running", "step": "Cắt đoạn video không audio", "voice_path": str(voice_path) if voice_path else ""})
             raw_segments = _split_exact_segments(
                 src,
                 raw_segments_dir,
@@ -455,12 +501,14 @@ def process_voice_split_alternate_zoom_batch(
                 ffprobe_path,
                 segment_seconds=float(segment_seconds),
                 mute_audio=True,
-                emit_log=emit_log,
+                emit_log=video_log,
                 stop_check=stop_check,
                 active_processes=active_processes,
             )
+
             final_segments: list[Path] = []
             emit_status({"current_step": "Zoom xen kẽ từng đoạn"})
+            _write_video_state(state_path, {"status": "running", "step": "Zoom xen kẽ từng đoạn", "raw_segments": len(raw_segments)})
             for idx, raw in enumerate(raw_segments, 1):
                 zoom = odd_zoom_percent if idx % 2 == 1 else even_zoom_percent
                 out = parts_dir / f"part_{idx:03d}.mp4"
@@ -474,35 +522,41 @@ def process_voice_split_alternate_zoom_batch(
                     pos_y=pos_y,
                     crf=crf,
                     bitrate=bitrate,
-                    emit_log=emit_log,
+                    emit_log=video_log,
                     stop_check=stop_check,
                     active_processes=active_processes,
                 )
                 final_segments.append(out)
+
             final_path = video_dir / "final.mp4"
             emit_status({"current_step": "Ghép final.mp4"})
+            _write_video_state(state_path, {"status": "running", "step": "Ghép final.mp4", "parts": len(final_segments), "final_path": str(final_path)})
             _concat_segments(
                 final_segments,
                 final_path,
                 ffmpeg_path,
                 final_concat_mode=final_concat_mode,
                 audio_path=voice_path,
-                emit_log=emit_log,
+                emit_log=video_log,
                 stop_check=stop_check,
                 active_processes=active_processes,
             )
+
             emit_status({"current_step": "Kiểm tra final.mp4"})
-            _validate_final_output(src, final_path, ffprobe_path, emit_log=emit_log)
+            _write_video_state(state_path, {"status": "running", "step": "Kiểm tra final.mp4"})
+            _validate_final_output(src, final_path, ffprobe_path, emit_log=video_log)
             ok_count += 1
             emit_status({
                 "current_step": "Hoàn thành video",
                 "processed_videos": video_index,
                 "current_video": src.name,
             })
-            emit_log(f"Hoàn thành {src.name}: {final_path}")
+            _write_video_state(state_path, {"status": "success", "step": "Hoàn thành", "final_path": str(final_path), "parts": len(final_segments)})
+            video_log(f"Hoàn thành {src.name}: {final_path}")
         except Exception as exc:
             message = f"Lỗi {src.name}: {exc}"
-            emit_log(message)
+            _write_video_state(state_path, {"status": "error", "step": "Lỗi", "error": str(exc)})
+            video_log(message)
             errors.append(message)
         emit_progress(int(video_index * 100 / len(paths)))
     if ok_count == 0:
