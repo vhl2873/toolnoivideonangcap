@@ -194,6 +194,7 @@ function batchResultPanel() {
       <button type="button" onclick="openBatchResult(${item.index},'folder')" ${item.folder_path?"":"disabled"}>Folder</button>
       <button type="button" onclick="openBatchResult(${item.index},'final')" ${item.final_path?"":"disabled"}>Final</button>
       <button type="button" onclick="openBatchResult(${item.index},'log')" ${item.log_path?"":"disabled"}>Log</button>
+      <button type="button" onclick="retrySingleFailedVideo(${item.index})" ${item.status==="error"?"":"disabled"}>Retry 1</button>
     </div>`).join("")}</div>`;
 }
 
@@ -317,6 +318,17 @@ async function retryFailedVideos() {
   if(!failedCount){toast("Chưa có video lỗi để retry");return;}
   const options=batchOptions({retry_failed_only:true});
   if(!options.timeline_paths.length){toast("Hãy kéo video từ thư viện xuống timeline trước");return;}
+  try {
+    const result=await api(`/api/projects/${project.id}/run`, {method:"POST", body:JSON.stringify({operation:"batch_voice_cut_zoom", options})});
+    toast(result.message);
+    await refreshProject();
+  } catch(error) { toast(error.message); }
+}
+
+async function retrySingleFailedVideo(index) {
+  const item=batchResults.find(entry=>entry.index===index);
+  if(!item || item.status!=="error"){toast("Video này chưa ở trạng thái lỗi");return;}
+  const options=batchOptions({timeline_paths:[item.source], retry_failed_only:false});
   try {
     const result=await api(`/api/projects/${project.id}/run`, {method:"POST", body:JSON.stringify({operation:"batch_voice_cut_zoom", options})});
     toast(result.message);

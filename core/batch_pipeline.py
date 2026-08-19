@@ -14,6 +14,25 @@ def _probe_has_stream(payload: dict, codec_type: str) -> bool:
     return any(stream.get("codec_type") == codec_type for stream in payload.get("streams", []))
 
 
+def _probe_primary_stream_duration(payload: dict, codec_type: str) -> float:
+    for stream in payload.get("streams", []):
+        if stream.get("codec_type") != codec_type:
+            continue
+        try:
+            duration = float(stream.get("duration") or 0)
+        except (TypeError, ValueError):
+            duration = 0.0
+        if duration > 0:
+            return duration
+    return 0.0
+
+def _effective_video_duration(payload: dict) -> float:
+    format_duration = media_duration_from_probe(payload)
+    video_duration = _probe_primary_stream_duration(payload, "video")
+    if video_duration > 0:
+        return video_duration
+    return format_duration
+
 def _validate_final_output(
     src: Path,
     final_path: Path,
@@ -23,8 +42,8 @@ def _validate_final_output(
 ) -> None:
     source_probe = run_ffprobe(src, ffprobe_path=ffprobe_path)
     final_probe = run_ffprobe(final_path, ffprobe_path=ffprobe_path)
-    source_duration = media_duration_from_probe(source_probe)
-    final_duration = media_duration_from_probe(final_probe)
+    source_duration = _effective_video_duration(source_probe)
+    final_duration = _effective_video_duration(final_probe)
     duration_diff = abs(final_duration - source_duration)
 
     has_video = _probe_has_stream(final_probe, "video")
@@ -160,12 +179,14 @@ def _prepare_voice_track(
     if not _usable_file(original_audio):
         emit_log("Trích xuất original_audio.wav từ video nguồn...")
         rc = _run(
-            [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(src), "-vn", "-ac", "2", "-ar", "44100", str(original_audio)],
+            [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-err_detect", "ignore_err", "-fflags", "+discardcorrupt", "-i", str(src), "-map", "0:a:0?", "-vn", "-ac", "2", "-ar", "44100", str(original_audio)],
             emit_log=emit_log,
             stop_check=stop_check,
             active_processes=active_processes,
         )
-        if rc != 0:
+        if rc != 0 and _usable_file(original_audio):
+            emit_log(f"Cảnh báo: original_audio.wav có lỗi decode một phần (exit {rc}) nhưng file đã được tạo, vẫn tiếp tục dùng.")
+        elif rc != 0:
             emit_log(f"Cảnh báo: không xuất được original_audio.wav (exit {rc}).")
             return None
 
@@ -207,7 +228,7 @@ def _split_exact_segments(
     active_processes: list[subprocess.Popen[str]],
 ) -> list[Path]:
     probe = run_ffprobe(src, ffprobe_path=ffprobe_path)
-    duration = media_duration_from_probe(probe)
+    duration = _effective_video_duration(probe)
     if duration <= 0:
         raise RuntimeError("Không xác định được thời lượng video để cắt đoạn.")
     if segment_seconds <= 0:
