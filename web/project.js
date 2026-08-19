@@ -216,7 +216,7 @@ function inspectorPanels(p) {
     <section class="inspector-panel" data-tool-panel="batch"><span class="eyebrow">PIPELINE HÀNG LOẠT</span><h3>Voice → Cắt đoạn → Zoom so le</h3>
       <label class="check"><input id="batch-ai-voice" type="checkbox" checked> Tách voice khỏi nhạc nền bằng AI</label>
       <label class="check"><input id="batch-remove-bg" type="checkbox" checked> Xóa nhạc nền, giữ giọng nói chính</label>
-      <label>Thời lượng mỗi đoạn<div class="input-unit"><input id="batch-seconds" type="number" min="1" step="0.5" value="5"><span>giây</span></div></label>
+      <label>Thời lượng mỗi Part<div class="input-unit"><input id="batch-seconds" type="number" min="3" step="0.5" value="5"><span>phút</span></div></label>
       <div class="xy-grid"><label>Zoom đoạn lẻ %<input id="batch-odd-zoom" type="number" min="25" max="300" value="100"></label><label>Zoom đoạn chẵn %<input id="batch-even-zoom" type="number" min="25" max="300" value="110"></label></div>
       <label>Kiểu zoom<select id="batch-zoom-mode"><option value="center">Cắt vào tâm hình</option><option value="custom">Tùy chỉnh vị trí</option></select></label>
       <div class="xy-grid"><label>Vị trí X<input id="batch-pos-x" type="number" value="0"></label><label>Vị trí Y<input id="batch-pos-y" type="number" value="0"></label></div>
@@ -224,7 +224,7 @@ function inspectorPanels(p) {
       <label>Bitrate video<input id="batch-bitrate" placeholder="auto hoặc 8M" value="auto"></label>
       <label>Ghép final<select id="batch-final-mode"><option value="fast">Nhanh - stream copy</option><option value="safe">An toàn - re-encode final</option></select></label>
       <label class="check"><input id="batch-resume" type="checkbox" checked> Tiếp tục từ file đã xử lý nếu chạy lại</label>
-      <div class="info-callout">Output mỗi video: voice.wav, segment_001.mp4..., final.mp4. Chế độ an toàn chậm hơn. Resume sẽ dùng lại segment/final đã có.</div>
+      <div class="info-callout">Output mỗi video: audio/voice.wav, parts/part_001.mp4..., final.mp4. Audio được xử lý nguyên track rồi ghép lại cuối để giảm lệch sync.</div>
       <button class="button primary full" onclick="runTool('batch')">Chạy pipeline hàng loạt</button>
     </section>
     <section class="inspector-panel" data-tool-panel="effects"><span class="eyebrow">HIỆU ỨNG</span><h3>Hiệu ứng nhanh</h3>

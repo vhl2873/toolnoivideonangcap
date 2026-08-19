@@ -307,7 +307,7 @@ class JobRunner:
                     ffprobe,
                     enable_ai_voice=bool(options.get("enable_ai_voice", True)),
                     remove_background=bool(options.get("remove_background", True)),
-                    segment_seconds=float(options.get("segment_seconds", 5)),
+                    segment_seconds=float(options.get("segment_seconds", 5)) * 60,
                     odd_zoom_percent=int(options.get("odd_zoom_percent", 100)),
                     even_zoom_percent=int(options.get("even_zoom_percent", 110)),
                     zoom_mode=str(options.get("zoom_mode", "center")),

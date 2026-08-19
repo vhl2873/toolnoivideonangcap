@@ -8,6 +8,37 @@ from typing import Callable
 from core.ffmpeg_tools import hidden_subprocess_kwargs, media_duration_from_probe, run_ffprobe, write_concat_list
 
 
+def _probe_has_stream(payload: dict, codec_type: str) -> bool:
+    return any(stream.get("codec_type") == codec_type for stream in payload.get("streams", []))
+
+
+def _validate_final_output(
+    src: Path,
+    final_path: Path,
+    ffprobe_path: str,
+    *,
+    emit_log: Callable[[str], None],
+) -> None:
+    source_probe = run_ffprobe(src, ffprobe_path=ffprobe_path)
+    final_probe = run_ffprobe(final_path, ffprobe_path=ffprobe_path)
+    source_duration = media_duration_from_probe(source_probe)
+    final_duration = media_duration_from_probe(final_probe)
+    duration_diff = abs(final_duration - source_duration)
+
+    has_video = _probe_has_stream(final_probe, "video")
+    has_audio = _probe_has_stream(final_probe, "audio")
+    if not has_video:
+        raise RuntimeError("final.mp4 không có video stream hợp lệ.")
+    if not has_audio:
+        raise RuntimeError("final.mp4 không có audio stream hợp lệ.")
+
+    emit_log(
+        f"Validate final: source={source_duration:.3f}s final={final_duration:.3f}s lệch={duration_diff:.3f}s"
+    )
+    if duration_diff > 0.1:
+        emit_log("Cảnh báo: duration final lệch quá 0.1s so với source.")
+
+
 def _usable_file(path: str | Path) -> bool:
     candidate = Path(path)
     return candidate.is_file() and candidate.stat().st_size > 0
@@ -84,9 +115,9 @@ def _run_demucs_vocal(
     return None
 
 
-def _extract_or_replace_voice(
+def _prepare_voice_track(
     src: Path,
-    work_dir: Path,
+    audio_dir: Path,
     ffmpeg_path: str,
     *,
     enable_ai_voice: bool,
@@ -94,64 +125,49 @@ def _extract_or_replace_voice(
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
-) -> tuple[Path, Path | None]:
-    voice_wav = work_dir / "voice.wav"
-    cleaned_video = work_dir / "_voice_clean_source.mp4"
+) -> Path | None:
+    original_audio = audio_dir / "original_audio.wav"
+    voice_wav = audio_dir / "voice.wav"
 
-    if _usable_file(cleaned_video) and _usable_file(voice_wav):
-        emit_log(f"Resume: dùng lại voice.wav và source đã xử lý sẵn cho {src.name}.")
-        return cleaned_video, voice_wav
-    if _usable_file(voice_wav) and not (enable_ai_voice or remove_background):
-        emit_log(f"Resume: dùng lại voice.wav đã có cho {src.name}; giữ audio gốc.")
-        return src, voice_wav
+    if _usable_file(voice_wav):
+        emit_log(f"Resume: dùng lại voice.wav đã có cho {src.name}.")
+        return voice_wav
 
-    vocal_audio: Path | None = None
-    if enable_ai_voice or remove_background:
-        vocal_audio = _run_demucs_vocal(
-            src,
-            work_dir,
-            emit_log=emit_log,
-            stop_check=stop_check,
-            active_processes=active_processes,
-        )
-
-    if vocal_audio and vocal_audio.is_file():
-        emit_log("Ghép lại video với voice đã tách, giữ nguyên độ dài hình ảnh.")
+    if not _usable_file(original_audio):
+        emit_log("Trích xuất original_audio.wav từ video nguồn...")
         rc = _run(
-            [
-                ffmpeg_path, "-hide_banner", "-y", "-nostdin",
-                "-i", str(src), "-i", str(vocal_audio),
-                "-map", "0:v:0", "-map", "1:a:0",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                "-shortest", str(cleaned_video),
-            ],
-            emit_log=emit_log,
-            stop_check=stop_check,
-            active_processes=active_processes,
-        )
-        if rc != 0 or not cleaned_video.exists():
-            raise RuntimeError(f"Không ghép được voice đã tách vào video: exit {rc}")
-        rc = _run(
-            [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(vocal_audio), "-ac", "2", "-ar", "44100", str(voice_wav)],
+            [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(src), "-vn", "-ac", "2", "-ar", "44100", str(original_audio)],
             emit_log=emit_log,
             stop_check=stop_check,
             active_processes=active_processes,
         )
         if rc != 0:
-            raise RuntimeError(f"Không xuất được voice.wav: exit {rc}")
-        return cleaned_video, voice_wav
+            emit_log(f"Cảnh báo: không xuất được original_audio.wav (exit {rc}).")
+            return None
 
-    emit_log("Không dùng AI voice hoặc AI không khả dụng: giữ audio gốc, chỉ xuất voice.wav tham chiếu.")
+    vocal_audio: Path | None = None
+    if enable_ai_voice or remove_background:
+        vocal_audio = _run_demucs_vocal(
+            src,
+            audio_dir,
+            emit_log=emit_log,
+            stop_check=stop_check,
+            active_processes=active_processes,
+        )
+
+    source_audio = vocal_audio if vocal_audio and vocal_audio.is_file() else original_audio
+    if source_audio == original_audio:
+        emit_log("Không dùng AI voice hoặc AI không khả dụng: dùng audio gốc làm voice tham chiếu.")
     rc = _run(
-        [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(src), "-vn", "-ac", "2", "-ar", "44100", str(voice_wav)],
+        [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(source_audio), "-ac", "2", "-ar", "44100", str(voice_wav)],
         emit_log=emit_log,
         stop_check=stop_check,
         active_processes=active_processes,
     )
     if rc != 0:
-        emit_log(f"Cảnh báo: không xuất được voice.wav từ audio gốc (exit {rc}).")
-        return src, None
-    return src, voice_wav
+        emit_log(f"Cảnh báo: không xuất được voice.wav (exit {rc}).")
+        return None
+    return voice_wav
 
 
 def _split_exact_segments(
@@ -161,6 +177,7 @@ def _split_exact_segments(
     ffprobe_path: str,
     *,
     segment_seconds: float,
+    mute_audio: bool = False,
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
@@ -186,15 +203,19 @@ def _split_exact_segments(
             segments.append(out)
             continue
         emit_log(f"Cắt đoạn {index + 1}/{total}: {start:.3f}s + {length:.3f}s")
+        cmd = [
+            ffmpeg_path, "-hide_banner", "-y", "-nostdin",
+            "-ss", f"{start:.3f}", "-i", str(src), "-t", f"{length:.3f}",
+            "-map", "0:v:0",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        ]
+        if mute_audio:
+            cmd += ["-an"]
+        else:
+            cmd += ["-map", "0:a?", "-c:a", "aac", "-b:a", "192k"]
+        cmd += ["-avoid_negative_ts", "make_zero", str(out)]
         rc = _run(
-            [
-                ffmpeg_path, "-hide_banner", "-y", "-nostdin",
-                "-ss", f"{start:.3f}", "-i", str(src), "-t", f"{length:.3f}",
-                "-map", "0:v:0", "-map", "0:a?",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                "-c:a", "aac", "-b:a", "192k",
-                "-avoid_negative_ts", "make_zero", str(out),
-            ],
+            cmd,
             emit_log=emit_log,
             stop_check=stop_check,
             active_processes=active_processes,
@@ -243,11 +264,38 @@ def _zoom_segment(
         cmd += ["-b:v", bitrate]
     else:
         cmd += ["-crf", str(crf or "20")]
-    cmd += ["-c:a", "aac", "-b:a", "192k", str(output_path)]
+    cmd += ["-an", str(output_path)]
     emit_log(f"Zoom đoạn {src.name}: {zoom_percent}% -> {output_path.name}")
     rc = _run(cmd, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
     if rc != 0 or not output_path.exists():
         raise RuntimeError(f"Zoom đoạn {src.name} thất bại: exit {rc}")
+
+
+def _mux_final_audio(
+    final_path: Path,
+    audio_path: Path,
+    ffmpeg_path: str,
+    *,
+    emit_log: Callable[[str], None],
+    stop_check: Callable[[], bool],
+    active_processes: list[subprocess.Popen[str]],
+) -> None:
+    temp_path = final_path.with_name(final_path.stem + "_with_audio.mp4")
+    rc = _run(
+        [
+            ffmpeg_path, "-hide_banner", "-y", "-nostdin",
+            "-i", str(final_path), "-i", str(audio_path),
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-shortest", "-movflags", "+faststart", str(temp_path),
+        ],
+        emit_log=emit_log,
+        stop_check=stop_check,
+        active_processes=active_processes,
+    )
+    if rc != 0 or not temp_path.exists():
+        raise RuntimeError(f"Ghép voice.wav vào final thất bại: exit {rc}")
+    temp_path.replace(final_path)
 
 
 def _concat_segments(
@@ -256,6 +304,7 @@ def _concat_segments(
     ffmpeg_path: str,
     *,
     final_concat_mode: str = "fast",
+    audio_path: Path | None = None,
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
@@ -284,6 +333,9 @@ def _concat_segments(
             active_processes=active_processes,
         )
         if rc == 0 and final_path.exists():
+            if audio_path and _usable_file(audio_path):
+                emit_log("Ghép lại voice.wav vào final..." )
+                _mux_final_audio(final_path, audio_path, ffmpeg_path, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
             return
         emit_log(f"Ghép nhanh báo exit {rc}; fallback sang ghép an toàn bằng re-encode final.")
     else:
@@ -315,6 +367,9 @@ def _concat_segments(
         except OSError:
             pass
     safe_final.replace(final_path)
+    if audio_path and _usable_file(audio_path):
+        emit_log("Ghép lại voice.wav vào final...")
+        _mux_final_audio(final_path, audio_path, ffmpeg_path, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
 
 
 def process_voice_split_alternate_zoom_batch(
@@ -375,10 +430,14 @@ def process_voice_split_alternate_zoom_batch(
             "total_videos": len(paths),
         })
         try:
+            audio_dir = video_dir / "audio"
+            parts_dir = video_dir / "parts"
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            parts_dir.mkdir(parents=True, exist_ok=True)
             emit_status({"current_step": "Tách voice / chuẩn bị audio"})
-            source_for_split, voice_path = _extract_or_replace_voice(
+            voice_path = _prepare_voice_track(
                 src,
-                video_dir,
+                audio_dir,
                 ffmpeg_path,
                 enable_ai_voice=enable_ai_voice,
                 remove_background=remove_background,
@@ -388,13 +447,14 @@ def process_voice_split_alternate_zoom_batch(
             )
             if voice_path:
                 emit_log(f"Đã có voice.wav: {voice_path}")
-            emit_status({"current_step": "Cắt đoạn"})
+            emit_status({"current_step": "Cắt đoạn video không audio"})
             raw_segments = _split_exact_segments(
-                source_for_split,
+                src,
                 raw_segments_dir,
                 ffmpeg_path,
                 ffprobe_path,
                 segment_seconds=float(segment_seconds),
+                mute_audio=True,
                 emit_log=emit_log,
                 stop_check=stop_check,
                 active_processes=active_processes,
@@ -403,7 +463,7 @@ def process_voice_split_alternate_zoom_batch(
             emit_status({"current_step": "Zoom xen kẽ từng đoạn"})
             for idx, raw in enumerate(raw_segments, 1):
                 zoom = odd_zoom_percent if idx % 2 == 1 else even_zoom_percent
-                out = video_dir / f"segment_{idx:03d}.mp4"
+                out = parts_dir / f"part_{idx:03d}.mp4"
                 _zoom_segment(
                     raw,
                     out,
@@ -426,10 +486,13 @@ def process_voice_split_alternate_zoom_batch(
                 final_path,
                 ffmpeg_path,
                 final_concat_mode=final_concat_mode,
+                audio_path=voice_path,
                 emit_log=emit_log,
                 stop_check=stop_check,
                 active_processes=active_processes,
             )
+            emit_status({"current_step": "Kiểm tra final.mp4"})
+            _validate_final_output(src, final_path, ffprobe_path, emit_log=emit_log)
             ok_count += 1
             emit_status({
                 "current_step": "Hoàn thành video",
