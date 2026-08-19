@@ -240,16 +240,28 @@ def _batch_results_for_project(project: dict) -> list[dict]:
             except (OSError, json.JSONDecodeError):
                 state = {"status": "unknown", "error": "Không đọc được project_state.json"}
         status = str(state.get("status") or "not_run")
+        step = str(state.get("step", ""))
+        error = str(state.get("error", ""))
+        parts = state.get("parts", 0)
+        encoder_mode = str(state.get("encoder_mode", ""))
+        encoder_label = str(state.get("encoder_label", ""))
+        if status == "not_run" and final_path and final_path.is_file():
+            status = "success"
+            step = step or "Đã có final.mp4"
+        elif status == "not_run" and video_dir and video_dir.is_dir():
+            if process_log and process_log.is_file():
+                status = "unknown"
+                step = step or "Đã có thư mục output nhưng thiếu project_state.json"
         results.append({
             "index": index,
             "source": str(source),
             "name": source.name,
             "status": status,
-            "step": state.get("step", ""),
-            "error": state.get("error", ""),
-            "parts": state.get("parts", 0),
-            "encoder_mode": state.get("encoder_mode", ""),
-            "encoder_label": state.get("encoder_label", ""),
+            "step": step,
+            "error": error,
+            "parts": parts,
+            "encoder_mode": encoder_mode,
+            "encoder_label": encoder_label,
             "folder_path": str(video_dir) if video_dir and video_dir.is_dir() else "",
             "final_path": str(final_path) if final_path and final_path.is_file() else "",
             "log_path": str(process_log) if process_log and process_log.is_file() else "",
