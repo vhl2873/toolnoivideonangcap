@@ -192,6 +192,27 @@ class JsonStore:
 STORE = JsonStore(DATA_FILE)
 
 
+def _safe_stem(path: str | Path) -> str:
+    text = Path(path).stem.strip() or "video"
+    for ch in '\\/:*?"<>|':
+        text = text.replace(ch, "_")
+    return text
+
+
+def _collect_retry_failed_paths(paths: list[str], output: Path) -> list[str]:
+    failed: list[str] = []
+    for raw_path in paths:
+        source = Path(raw_path).resolve()
+        state_path = output / _safe_stem(source) / "project_state.json"
+        if not state_path.is_file():
+            continue
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if str(payload.get("status", "")).lower() == "error":
+            failed.append(str(source))
+    return failed
 
 
 def _latest_final_for_project(project: dict) -> Path | None:
@@ -276,6 +297,13 @@ class JobRunner:
                 raise RuntimeError("Không tìm thấy FFmpeg/FFprobe.")
             ffmpeg = str(tools["ffmpeg"])
             ffprobe = str(tools["ffprobe"])
+            if operation == "batch_voice_cut_zoom" and bool(options.get("retry_failed_only", False)):
+                retry_paths = _collect_retry_failed_paths(paths, output)
+                if not retry_paths:
+                    raise RuntimeError("Không tìm thấy video lỗi nào để chạy lại.")
+                paths = retry_paths
+                STORE.append_log(project_id, "info", f"Retry failed only: chạy lại {len(paths)} video lỗi.")
+
             STORE.update(project_id, {
                 "status": "Đang chạy", "progress": 1, "error_message": "",
                 "job_stage": "Chuẩn bị", "current_video": "", "current_step": "Kiểm tra đầu vào",

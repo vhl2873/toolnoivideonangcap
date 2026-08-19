@@ -224,6 +224,7 @@ function inspectorPanels(p) {
       <label>Bitrate video<input id="batch-bitrate" placeholder="auto hoặc 8M" value="auto"></label>
       <label>Ghép final<select id="batch-final-mode"><option value="fast">Nhanh - stream copy</option><option value="safe">An toàn - re-encode final</option></select></label>
       <label class="check"><input id="batch-resume" type="checkbox" checked> Tiếp tục từ file đã xử lý nếu chạy lại</label>
+      <label class="check"><input id="batch-retry-failed" type="checkbox"> Chỉ chạy lại các video đang lỗi</label>
       <div class="info-callout">Output mỗi video: audio/voice.wav, parts/part_001.mp4..., final.mp4. Audio được xử lý nguyên track rồi ghép lại cuối để giảm lệch sync.</div>
       <button class="button primary full" onclick="runTool('batch')">Chạy pipeline hàng loạt</button>
     </section>
@@ -286,6 +287,7 @@ async function runTool(operation) {
       bitrate:$("#batch-bitrate").value || "auto",
       final_concat_mode:$("#batch-final-mode").value,
       resume_enabled:$("#batch-resume").checked,
+      retry_failed_only:$("#batch-retry-failed").checked,
     };
   }
   if(operation==="effects"){options={effects:$$(`[data-effect].active`).map(button=>button.dataset.effect)};if(!options.effects.length){toast("Hãy chọn ít nhất một hiệu ứng");return}}
