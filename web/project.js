@@ -191,6 +191,7 @@ function batchResultPanel() {
     <div class="batch-result ${esc(item.status)}">
       <div><b>${esc(item.name)}</b><small>${esc(item.step||item.status)}${item.error?` • ${esc(item.error)}`:""}</small></div>
       <span class="batch-status">${esc(item.status)}</span>
+      <button type="button" onclick="openBatchResult(${item.index},'folder')" ${item.folder_path?"":"disabled"}>Folder</button>
       <button type="button" onclick="openBatchResult(${item.index},'final')" ${item.final_path?"":"disabled"}>Final</button>
       <button type="button" onclick="openBatchResult(${item.index},'log')" ${item.log_path?"":"disabled"}>Log</button>
     </div>`).join("")}</div>`;
@@ -272,7 +273,7 @@ async function openFinalVideo() {
 
 async function openBatchResult(index,type) {
   try {
-    const suffix = type === 'log' ? '?log' : '?final';
+    const suffix = type === 'log' ? '?log' : type === 'folder' ? '?folder' : '?final';
     const result=await api(`/api/projects/${project.id}/open-result/${index}${suffix}`, {method:"POST", body:"{}"});
     toast(result.message);
   } catch(error) { toast(error.message); }
