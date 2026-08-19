@@ -388,6 +388,7 @@ class JobRunner:
                     bitrate=str(options.get("bitrate", "auto")),
                     final_concat_mode=str(options.get("final_concat_mode", "fast")),
                     encoder_mode=str(options.get("encoder_mode", "auto")),
+                    encoder_preset=str(options.get("encoder_preset", "p4")),
                     resume_enabled=bool(options.get("resume_enabled", True)),
                     emit_log=emit,
                     emit_progress=lambda value: STORE.update(project_id, {"progress": max(1, min(95, int(value)))}) or None,

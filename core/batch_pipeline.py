@@ -22,13 +22,17 @@ def _video_encode_args(
     encoder_mode: str,
     bitrate: str,
     crf: str,
+    encoder_preset: str = "p4",
     allow_bitrate: bool = True,
 ) -> list[str]:
     mode = _normalize_encoder_mode(encoder_mode)
     bitrate_text = str(bitrate or "auto").strip()
     auto_bitrate = bitrate_text.lower() in {"", "auto", "tự động", "giu nguyen", "giữ nguyên"}
     if mode == "nvidia":
-        args = ["-c:v", "h264_nvenc", "-preset", "p4"]
+        preset = str(encoder_preset or "p4").strip().lower()
+        if preset not in {"p1", "p2", "p3", "p4", "p5", "p6", "p7"}:
+            preset = "p4"
+        args = ["-c:v", "h264_nvenc", "-preset", preset]
         if allow_bitrate and not auto_bitrate:
             args += ["-b:v", bitrate_text]
         else:
@@ -64,6 +68,10 @@ def _effective_video_duration(payload: dict) -> float:
     if video_duration > 0:
         return video_duration
     return format_duration
+
+def _media_video_duration(path: Path, ffprobe_path: str) -> float:
+    return _effective_video_duration(run_ffprobe(path, ffprobe_path=ffprobe_path))
+
 
 def _validate_final_output(
     src: Path,
@@ -256,6 +264,7 @@ def _split_exact_segments(
     segment_seconds: float,
     mute_audio: bool = False,
     encoder_mode: str = "cpu",
+    encoder_preset: str = "p4",
     crf: str = "20",
     bitrate: str = "auto",
     emit_log: Callable[[str], None],
@@ -287,7 +296,7 @@ def _split_exact_segments(
             ffmpeg_path, "-hide_banner", "-y", "-nostdin",
             "-ss", f"{start:.3f}", "-i", str(src), "-t", f"{length:.3f}",
             "-map", "0:v:0",
-        ] + _video_encode_args(encoder_mode=encoder_mode, bitrate=bitrate, crf=crf)
+        ] + _video_encode_args(encoder_mode=encoder_mode, encoder_preset=encoder_preset, bitrate=bitrate, crf=crf)
         if mute_audio:
             cmd += ["-an"]
         else:
@@ -317,6 +326,7 @@ def _zoom_segment(
     crf: str,
     bitrate: str,
     encoder_mode: str = "cpu",
+    encoder_preset: str = "p4",
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
@@ -338,12 +348,48 @@ def _zoom_segment(
     cmd = [
         ffmpeg_path, "-hide_banner", "-y", "-nostdin",
         "-i", str(src), "-vf", vf,
-    ] + _video_encode_args(encoder_mode=encoder_mode, bitrate=bitrate, crf=crf)
+    ] + _video_encode_args(encoder_mode=encoder_mode, encoder_preset=encoder_preset, bitrate=bitrate, crf=crf)
     cmd += ["-an", str(output_path)]
     emit_log(f"Zoom đoạn {src.name}: {zoom_percent}% -> {output_path.name}")
     rc = _run(cmd, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
     if rc != 0 or not output_path.exists():
         raise RuntimeError(f"Zoom đoạn {src.name} thất bại: exit {rc}")
+
+
+def _pad_final_duration(
+    src: Path,
+    final_path: Path,
+    ffmpeg_path: str,
+    ffprobe_path: str,
+    *,
+    encoder_mode: str,
+    encoder_preset: str,
+    crf: str,
+    bitrate: str,
+    emit_log: Callable[[str], None],
+    stop_check: Callable[[], bool],
+    active_processes: list[subprocess.Popen[str]],
+) -> None:
+    source_duration = _media_video_duration(src, ffprobe_path)
+    final_duration = _media_video_duration(final_path, ffprobe_path)
+    missing = source_duration - final_duration
+    if missing <= 0.1 or missing > 1.5:
+        return
+    emit_log(f"Final ngắn hơn source {missing:.3f}s; kéo dài frame cuối để giảm lệch duration.")
+    temp_path = final_path.with_name(final_path.stem + "_duration_fix.mp4")
+    video_args = _video_encode_args(encoder_mode=encoder_mode, encoder_preset=encoder_preset, bitrate=bitrate, crf=crf)
+    cmd = [
+        ffmpeg_path, "-hide_banner", "-y", "-nostdin",
+        "-i", str(final_path),
+        "-vf", f"tpad=stop_mode=clone:stop_duration={missing:.3f}",
+        "-af", f"apad=pad_dur={missing:.3f}",
+        "-t", f"{source_duration:.3f}",
+    ] + video_args + ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(temp_path)]
+    rc = _run(cmd, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
+    if rc != 0 or not temp_path.exists():
+        emit_log(f"Cảnh báo: không kéo dài được final để khớp duration (exit {rc}).")
+        return
+    temp_path.replace(final_path)
 
 
 def _mux_final_audio(
@@ -381,6 +427,7 @@ def _concat_segments(
     final_concat_mode: str = "fast",
     audio_path: Path | None = None,
     encoder_mode: str = "cpu",
+    encoder_preset: str = "p4",
     crf: str = "20",
     bitrate: str = "auto",
     emit_log: Callable[[str], None],
@@ -425,7 +472,7 @@ def _concat_segments(
         "-fflags", "+genpts+igndts",
         "-f", "concat", "-safe", "0", "-i", str(list_path),
         "-map", "0",
-    ] + _video_encode_args(encoder_mode=encoder_mode, bitrate=bitrate, crf=crf) + [
+    ] + _video_encode_args(encoder_mode=encoder_mode, encoder_preset=encoder_preset, bitrate=bitrate, crf=crf) + [
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         "-avoid_negative_ts", "make_zero",
@@ -468,6 +515,7 @@ def process_voice_split_alternate_zoom_batch(
     bitrate: str = "auto",
     final_concat_mode: str = "fast",
     encoder_mode: str = "auto",
+    encoder_preset: str = "p4",
     resume_enabled: bool = True,
     emit_log: Callable[[str], None],
     emit_progress: Callable[[int], None],
@@ -568,6 +616,7 @@ def process_voice_split_alternate_zoom_batch(
                 segment_seconds=float(segment_seconds),
                 mute_audio=True,
                 encoder_mode=video_encoder_mode,
+                encoder_preset=encoder_preset,
                 crf=crf,
                 bitrate=bitrate,
                 emit_log=video_log,
@@ -592,6 +641,7 @@ def process_voice_split_alternate_zoom_batch(
                     crf=crf,
                     bitrate=bitrate,
                     encoder_mode=video_encoder_mode,
+                    encoder_preset=encoder_preset,
                     emit_log=video_log,
                     stop_check=stop_check,
                     active_processes=active_processes,
@@ -609,6 +659,7 @@ def process_voice_split_alternate_zoom_batch(
                     final_concat_mode=final_concat_mode,
                     audio_path=voice_path,
                     encoder_mode=video_encoder_mode,
+                    encoder_preset=encoder_preset,
                     crf=crf,
                     bitrate=bitrate,
                     emit_log=video_log,
@@ -630,6 +681,7 @@ def process_voice_split_alternate_zoom_batch(
                         segment_seconds=float(segment_seconds),
                         mute_audio=True,
                         encoder_mode=video_encoder_mode,
+                        encoder_preset=encoder_preset,
                         crf=crf,
                         bitrate=bitrate,
                         emit_log=video_log,
@@ -656,6 +708,7 @@ def process_voice_split_alternate_zoom_batch(
                             crf=crf,
                             bitrate=bitrate,
                             encoder_mode=video_encoder_mode,
+                            encoder_preset=encoder_preset,
                             emit_log=video_log,
                             stop_check=stop_check,
                             active_processes=active_processes,
@@ -673,6 +726,7 @@ def process_voice_split_alternate_zoom_batch(
                         final_concat_mode=final_concat_mode,
                         audio_path=voice_path,
                         encoder_mode=video_encoder_mode,
+                        encoder_preset=encoder_preset,
                         crf=crf,
                         bitrate=bitrate,
                         emit_log=video_log,
@@ -681,6 +735,20 @@ def process_voice_split_alternate_zoom_batch(
                     )
                 else:
                     raise
+
+            _pad_final_duration(
+                src,
+                final_path,
+                ffmpeg_path,
+                ffprobe_path,
+                encoder_mode=video_encoder_mode,
+                encoder_preset=encoder_preset,
+                crf=crf,
+                bitrate=bitrate,
+                emit_log=video_log,
+                stop_check=stop_check,
+                active_processes=active_processes,
+            )
 
             emit_status({"current_step": "Kiểm tra final.mp4"})
             _write_video_state(state_path, {"status": "running", "step": "Kiểm tra final.mp4"})
