@@ -240,6 +240,7 @@ function inspectorPanels(p) {
       <label>Chất lượng CRF<input id="batch-crf" type="number" min="12" max="35" value="20"></label>
       <label>Bitrate video<input id="batch-bitrate" placeholder="auto hoặc 8M" value="auto"></label>
       <label>Ghép final<select id="batch-final-mode"><option value="fast">Nhanh - stream copy</option><option value="safe">An toàn - re-encode final</option></select></label>
+      <label>Encode video<select id="batch-encoder-mode"><option value="auto">Auto - ưu tiên NVIDIA, lỗi thì về CPU</option><option value="nvidia">NVIDIA NVENC</option><option value="cpu">CPU libx264</option></select></label>
       <label class="check"><input id="batch-resume" type="checkbox" checked> Tiếp tục từ file đã xử lý nếu chạy lại</label>
       <label class="check"><input id="batch-retry-failed" type="checkbox"> Chỉ chạy lại các video đang lỗi</label>
       <div class="info-callout">Output mỗi video: audio/voice.wav, parts/part_001.mp4..., final.mp4. Audio được xử lý nguyên track rồi ghép lại cuối để giảm lệch sync.</div>
@@ -307,6 +308,7 @@ function batchOptions(extra={}) {
     crf:$("#batch-crf")?.value || "20",
     bitrate:$("#batch-bitrate")?.value || "auto",
     final_concat_mode:$("#batch-final-mode")?.value || "fast",
+    encoder_mode:$("#batch-encoder-mode")?.value || "auto",
     resume_enabled:$("#batch-resume")?.checked ?? true,
     retry_failed_only:$("#batch-retry-failed")?.checked ?? false,
     ...extra,
