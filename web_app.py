@@ -5,6 +5,7 @@ import mimetypes
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -21,8 +22,23 @@ from core.media_extra import (
     apply_video_effects, extract_audio, separate_vocals_background, split_video_by_duration, transform_video_zoom,
 )
 
-ROOT = Path(__file__).resolve().parent
-WEB_ROOT = ROOT / "web"
+def _app_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _resource_root() -> Path:
+    if getattr(sys, "frozen", False):
+        bundle_dir = getattr(sys, "_MEIPASS", None)
+        if bundle_dir:
+            return Path(bundle_dir).resolve()
+    return _app_root()
+
+
+ROOT = _app_root()
+RESOURCE_ROOT = _resource_root()
+WEB_ROOT = RESOURCE_ROOT / "web"
 DATA_FILE = ROOT / "data" / "projects.json"
 HOST = "127.0.0.1"
 PORT = 8765
@@ -128,7 +144,7 @@ class JsonStore:
             allowed = {
                 "name", "task_type", "status", "progress", "priority",
                 "input_paths", "output_path", "settings", "error_message",
-                "job_stage", "current_video", "current_step", "processed_videos", "total_videos",
+                "job_stage", "current_video", "current_step", "processed_videos", "total_videos", "current_encoder",
             }
             for key, value in changes.items():
                 if key in allowed:

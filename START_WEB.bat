@@ -1,3 +1,7 @@
 @echo off
 cd /d "%~dp0"
-python web_app.py
+if exist "FastVideoWeb.exe" (
+  start "Fast Video Web" "FastVideoWeb.exe"
+) else (
+  python web_app.py
+)

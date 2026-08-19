@@ -174,6 +174,14 @@ def _run(
             pass
 
 
+def _demucs_python() -> str:
+    project_root = Path(__file__).resolve().parents[1]
+    local_python = project_root / ".venv-demucs" / "Scripts" / "python.exe"
+    if local_python.is_file():
+        return str(local_python)
+    return sys.executable
+
+
 def _run_demucs_vocal(
     src: Path,
     work_dir: Path,
@@ -184,8 +192,9 @@ def _run_demucs_vocal(
 ) -> Path | None:
     demucs_root = work_dir / "demucs"
     demucs_root.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "demucs", "--two-stems=vocals", "-o", str(demucs_root), str(src)]
-    emit_log("AI: tách giọng chính khỏi nhạc nền bằng Demucs...")
+    python_path = _demucs_python()
+    cmd = [python_path, "-m", "demucs", "--two-stems=vocals", "-o", str(demucs_root), str(src)]
+    emit_log(f"AI: tách giọng chính khỏi nhạc nền bằng Demucs ({python_path})...")
     rc = _run(cmd, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
     if rc != 0 or stop_check():
         emit_log(f"Demucs không chạy thành công (exit {rc}); sẽ giữ audio gốc.")

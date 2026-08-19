@@ -3,6 +3,7 @@ __pycache__/
 *.log
 
 .venv/
+.venv-demucs/
 venv/
 .env
 .env.*
