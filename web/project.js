@@ -224,6 +224,7 @@ function batchResultPanel() {
 }
 
 function inspectorPanels(p) {
+  const timelinePaths = p.settings?.timeline_paths || [];
   return `
     <section class="inspector-panel active" data-tool-panel="media">
       <span class="eyebrow">THÔNG TIN DỰ ÁN</span><h3>${esc(p.name)}</h3>
