@@ -793,17 +793,32 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    url = f"http://{HOST}:{PORT}"
-    print(f"Fast Video Studio Web: {url}")
-    print(f"Data file: {DATA_FILE}")
-    threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+    lock_file = ROOT / "data" / "server.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except OSError:
+        print(f"ERROR: Server already running (lock file exists at {lock_file})")
+        print("Please close existing server and try again.")
+        return
+    try:
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+        url = f"http://{HOST}:{PORT}"
+        print(f"Fast Video Studio Web: {url}")
+        print(f"Data file: {DATA_FILE}")
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
     finally:
-        server.server_close()
+        try:
+            lock_file.unlink()
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
