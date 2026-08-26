@@ -7,7 +7,9 @@ from datetime import datetime
 from pathlib import Path
 
 PROJECT_STATUSES = ("Bản nháp", "Chưa chạy", "Đang chờ", "Đang chạy", "Tạm dừng", "Hoàn thành", "Lỗi", "Đã hủy")
-TASK_TYPES = ("Nối video", "Chuẩn hóa video", "Chia nhỏ video", "Phóng to/thu nhỏ", "Thêm hiệu ứng", "Tách âm thanh", "Tách giọng và nhạc nền", "Chuyển đổi định dạng")
+# Chỉ còn 1 pipeline duy nhất cho mọi dự án: tách giọng/nhạc nền -> cắt đoạn -> zoom so le -> nối final.mp4
+# (giống hệt luồng batch của bản web). Giữ dạng tuple để chỗ nào còn tham chiếu TASK_TYPES không vỡ.
+TASK_TYPES = ("Xử lý video",)
 PRIORITIES = ("Khẩn cấp", "Cao", "Bình thường", "Thấp")
 
 @dataclass(slots=True)
@@ -69,7 +71,23 @@ class ProjectStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
                 CREATE INDEX IF NOT EXISTS idx_project_logs_project ON project_logs(project_id);
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT ''
+                );
             """)
+
+    def get_app_setting(self, key: str, default: str = "") -> str:
+        with self._connect() as connection:
+            row = connection.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_app_setting(self, key: str, value: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO app_settings(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
 
     def list_projects(self) -> list[Project]:
         with self._connect() as connection:
@@ -121,6 +139,26 @@ class ProjectStore:
         return self.create_project(name=f"{p.name} — Bản sao", task_type=p.task_type,
             priority=p.priority, input_path=p.input_path, output_path=p.output_path,
             file_count=p.file_count, settings=p.settings)
+
+    def update_fields(self, project_id: int, **fields: object) -> None:
+        allowed = {"name", "output_path", "input_path", "priority", "task_type"}
+        columns = [key for key in fields if key in allowed and fields[key] is not None]
+        if not columns:
+            return
+        assignments = ", ".join(f"{col}=?" for col in columns)
+        values = [fields[col] for col in columns]
+        with self._connect() as connection:
+            connection.execute(f"UPDATE projects SET {assignments} WHERE id=?", (*values, project_id))
+
+    def update_settings(self, project_id: int, **patch: object) -> None:
+        project = self.get_project(project_id)
+        if project is None:
+            return
+        settings = project.settings
+        settings.update(patch)
+        with self._connect() as connection:
+            connection.execute("UPDATE projects SET settings_json=? WHERE id=?",
+                (json.dumps(settings, ensure_ascii=False), project_id))
 
     def add_log(self, project_id: int, level: str, message: str) -> None:
         with self._connect() as connection:

@@ -1,125 +1,75 @@
-# Fast Video Studio / Fast Video Concatenator
+# Fast Video Studio
 
-Ứng dụng local Windows để xử lý video bằng FFmpeg.
-
-Hiện dự án có 2 giao diện dùng chung một lõi xử lý:
-
-- **Desktop PySide6**: nối video nhanh, phân tích tương thích, preview, các tác vụ media.
-- **Web local control panel**: quản lý dự án, import nhiều video, chạy batch pipeline và theo dõi log/progress trên trình duyệt.
-
-Mục tiêu chính vẫn là **giữ chức năng nối video thật nhanh và ổn định**, đồng thời mở rộng thêm các pipeline xử lý video hàng loạt theo nhu cầu thực tế.
-
-## Nguyên tắc hoạt động
-
-App chỉ nối nhanh khi các file đầu vào tương thích về stream:
-
-- codec video
-- codec audio
-- số lượng và thứ tự stream
-- độ phân giải
-- fps
-- pixel format
-- sample rate, số channel audio
-- time base và một số thông số liên quan khác
-
-Nếu metadata khác nhau, app sẽ báo rõ trong log và không chạy nối nhanh. Bạn cần tự chuẩn bị các file cùng thông số trước.
-
-Ghi chú về fps: app dùng `r_frame_rate` trong nhóm kiểm tra chặn. `avg_frame_rate` có thể lệch nhẹ giữa các file do cách FFprobe tính trung bình theo thời lượng từng video, nhất là với file tải từ web hoặc video biến thiên frame rate. Vì vậy app không chặn nối chỉ vì `avg_frame_rate` khác.
-
-Ghi chú về audio: `AAC LC` và `HE-AAC` đều có thể hiện là codec `aac`, nhưng profile khác nhau. App xem đây là không tương thích cho nối nhanh vì stream copy không sửa lại audio header.
-
-Lệnh FFmpeg cốt lõi:
-
-```powershell
-ffmpeg -f concat -safe 0 -i list.txt -map 0 -c copy -avoid_negative_ts make_zero output.mp4
-```
-
-File `list.txt` do app tạo có ghi cả duration đã phân tích từ video gốc:
+Ứng dụng desktop Windows (PySide6) xử lý video tự động theo pipeline:
 
 ```text
-file 'D:/video/part01.mp4'
-duration 1234.567000
-file 'D:/video/part02.mp4'
-duration 987.654000
+Tách giọng / bỏ nhạc nền (AI - Demucs)  ->  Cắt đoạn  ->  Zoom xen kẽ từng đoạn  ->  Nối final.mp4
 ```
 
-App có thể xuất `.mp4` hoặc `.mkv`. Với output rất dài, ví dụ 50-100 tiếng hoặc file có nhiều stream, `.mkv` thường dễ mux và dễ phát ổn định hơn. Một số trình phát hoặc Windows Explorer có thể hiển thị sai duration của file rất dài, ví dụ chỉ hiện phần dư sau mốc 24 giờ; app dùng ffprobe để kiểm tra thời lượng thật sau khi nối. Nếu chọn `.mp4` cho video trên 24 giờ, app sẽ cảnh báo. Với output từ 100 tiếng trở lên, app chặn xuất `.mp4` và yêu cầu dùng `.mkv` để tránh FFmpeg treo lâu khi mux/finalize MP4.
+Mỗi dự án chỉ cần 1 video nguồn. Toàn bộ dự án dùng chung một pipeline duy nhất, không cần chọn loại tác vụ.
 
-Khi phân tích, app không chỉ lấy `format.duration` vì metadata container có thể sai với video dài/remux. App lấy duration lớn nhất hợp lệ từ `format.duration`, `stream.duration`, `duration_ts + time_base`, tag `DURATION`, và fallback `nb_frames / frame_rate` cho stream video/audio. Sau khi nối xong, app dùng cùng cách này để kiểm tra lại duration file output và so với tổng thời lượng đã phân tích. Nếu output ngắn bất thường, app sẽ báo lỗi trong log thay vì báo hoàn tất giả.
+## Dùng bản portable (khuyến nghị cho người nhận)
 
-## Cấu trúc project
+1. Giải nén file zip.
+2. Chạy `FastVideoStudio.exe`.
+3. Dùng luôn — không cần cài Python, FFmpeg hay Demucs, tất cả đã có sẵn trong gói.
+
+Cấu trúc gói portable:
+
+```text
+FastVideoStudio.exe
+tools\ffmpeg\bin\ffmpeg.exe / ffprobe.exe   # FFmpeg đi kèm
+.venv-demucs\                                # môi trường AI tách giọng (nếu có kèm theo)
+assets\                                      # icon, tài nguyên giao diện
+```
+
+Nếu gói không có `.venv-demucs`, app vẫn chạy bình thường — bước tách giọng sẽ tự động fallback dùng audio gốc (không lỗi, không dừng batch), chỉ là không tách được nhạc nền.
+
+Dữ liệu dự án (SQLite) được lưu tại `%USERPROFILE%\.fast_video_studio\projects.db`, không ghi vào thư mục cài đặt — xóa/di chuyển thư mục app không mất dữ liệu, có thể copy file này sang máy khác để mang theo lịch sử dự án.
+
+## Quy trình sử dụng
+
+1. **Tạo dự án mới** — chỉ cần đặt tên.
+2. Mở dự án, bấm **Chọn video…** ở khung "VIDEO GỐC" để chọn video nguồn.
+3. (Tùy chọn) đặt **Thư mục đầu ra chung** ở tab Dự án — áp dụng cho mọi dự án, mỗi dự án vẫn có thư mục con riêng nên không đụng độ nhau.
+4. Chỉnh **THIẾT LẬP XỬ LÝ**: thời lượng mỗi đoạn (1-5 phút), % zoom đoạn lẻ/chẵn, bộ mã hóa (tự động ưu tiên GPU NVIDIA), tách giọng AI, hiệu ứng hạt phim + render 4K (tùy chọn).
+5. Bấm **BẮT ĐẦU XỬ LÝ**. Có thể xếp nhiều dự án chạy tuần tự qua **Chạy tất cả** ở tab Tổng quan.
+6. Khi xong, khung **VIDEO ĐÃ XỬ LÝ** hiện video final để đối chiếu trực tiếp với video gốc.
+
+Kết quả mỗi dự án:
+
+```text
+{Thư mục đầu ra}\{id}_{tên dự án}\{tên video}\final.mp4   # bản đầy đủ, có các file trung gian (voice.wav, segment...)
+{Thư mục đầu ra}\{tên dự án}.mp4                            # bản sao phẳng, dễ tìm — vẫn còn sau khi xóa dự án
+```
+
+Xóa dự án trong app sẽ xóa dữ liệu dự án + toàn bộ file trung gian, nhưng **giữ lại** file `{tên dự án}.mp4` phẳng ở trên.
+
+## Cấu trúc mã nguồn (cho người phát triển)
 
 ```text
 main.py                 # entry desktop app
-web_app.py              # local web server / API điều khiển tool
-START_WEB.bat           # chạy web nhanh trên Windows
-
-core/                   # lõi xử lý FFmpeg / batch pipeline
-  ffmpeg_tools.py
-  media_extra.py
-  batch_pipeline.py
-  mp4_concat.py
-  video_analyzer.py
-
-workers/                # worker cho desktop app
-ui/                     # giao diện desktop PySide6
-web/                    # giao diện web local
-utils/                  # helper/path/resources
-
-data/                   # dữ liệu project/output local khi chạy web
-assets/                 # icon/tài nguyên giao diện
-build/ dist/            # artifact build
-requirements.txt
-README.md
+core/
+  batch_pipeline.py      # pipeline xử lý chính (tách giọng -> cắt -> zoom -> final.mp4)
+  ffmpeg_tools.py         # helper FFmpeg/FFprobe
+  project_store.py        # SQLite project store
+workers/
+  batch_pipeline_worker.py  # bọc pipeline vào QThread
+ui/
+  dashboard_window.py     # màn hình quản lý dự án
+  pipeline_window.py       # màn hình xử lý 1 dự án
+  editor_common.py         # widget/helper dùng chung
+  styles.py
+utils/
+  resources.py             # resource_path (tương thích PyInstaller frozen)
+assets/                   # icon, hiệu ứng hạt phim
+tools/ffmpeg/             # FFmpeg portable đi kèm
+.venv-demucs/              # (tùy chọn) môi trường Python riêng chạy Demucs AI
 ```
 
-## Cài FFmpeg trên Windows
+## Build lại `.exe`
 
-Cách đơn giản nhất nếu máy có `winget`:
-
-```powershell
-winget install Gyan.FFmpeg
-```
-
-Hoặc tải bản build Windows từ:
-
-- https://www.gyan.dev/ffmpeg/builds/
-- https://www.ffmpeg.org/download.html
-
-Sau khi cài hoặc giải nén, hãy thêm thư mục `bin` của FFmpeg vào biến môi trường `PATH`, ví dụ:
-
-```text
-C:\ffmpeg\bin
-```
-
-Kiểm tra trong PowerShell:
-
-```powershell
-ffmpeg -version
-ffprobe -version
-```
-
-Nếu hai lệnh trên chạy được, app sẽ tìm thấy FFmpeg và FFprobe.
-
-App cũng tự tìm FFmpeg portable trong project theo dạng:
-
-```text
-tools\ffmpeg\bin\ffmpeg.exe
-tools\ffmpeg\bin\ffprobe.exe
-```
-
-Hoặc nếu bạn giải nén bản zip có thư mục lồng nhau, app cũng sẽ tìm trong:
-
-```text
-tools\ffmpeg\**\bin\ffmpeg.exe
-tools\ffmpeg\**\bin\ffprobe.exe
-```
-
-## Cài Python dependency
-
-Yêu cầu Python 3.10 hoặc mới hơn.
-
-Khuyến nghị dùng virtual environment:
+Yêu cầu Python 3.10+, đã cài `requirements.txt`:
 
 ```powershell
 python -m venv .venv
@@ -128,98 +78,30 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-## Chạy app
-
-### Desktop
+Build:
 
 ```powershell
-python main.py
+powershell -ExecutionPolicy Bypass -File .\build_portable.ps1
 ```
 
-### Web local
+Script sẽ build `FastVideoStudio.exe` bằng PyInstaller, gom `tools\ffmpeg`, `.venv-demucs` (nếu có) vào `dist\FastVideoStudio_Portable\`, rồi nén thành `dist\FastVideoStudio_Portable.zip` — gửi nguyên file zip này cho người nhận.
+
+### Cài môi trường Demucs (AI tách giọng) trước khi build
 
 ```powershell
-python web_app.py
+py -3.10 -m venv .venv-demucs
+.\.venv-demucs\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+.\.venv-demucs\Scripts\python.exe -m pip install numpy demucs
 ```
 
-hoặc:
+Nếu máy build có GPU NVIDIA, cài thêm bản PyTorch có CUDA để tách giọng chạy nhanh hơn (bản portable vẫn chạy bình thường trên máy không có GPU, chỉ là chạy CPU chậm hơn):
 
 ```powershell
-START_WEB.bat
+.\.venv-demucs\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cu126 torch
 ```
-
-Web mặc định chạy tại:
-
-```text
-http://127.0.0.1:8765
-```
-
-Trước lần mở desktop đầu tiên, đặt mật khẩu thiết lập bằng biến môi trường
-`FAST_VIDEO_CONCAT_SETUP_PASSWORD`. Không lưu mật khẩu trực tiếp trong mã nguồn:
-
-```powershell
-$env:FAST_VIDEO_CONCAT_SETUP_PASSWORD = "mat-khau-cua-ban"
-python main.py
-```
-
-Quy trình sử dụng:
-
-1. Bấm **Thêm file** và chọn nhiều video.
-2. Kéo thả các dòng video để đổi thứ tự nối, hoặc dùng **Lên** / **Xuống**.
-3. Chọn thư mục lưu output.
-4. Bấm **Phân tích** để kiểm tra tương thích bằng ffprobe.
-5. Nếu muốn tạo một file duy nhất, bấm **Nối nhanh 1 file**.
-6. Nếu danh sách có nhiều luồng tương thích khác nhau, bấm **Nối dài an toàn** để xuất từng luồng thành file riêng trước.
-7. App sẽ tự tạo file dạng `VIDEO_yyyyMMdd_HHmmss.mp4` hoặc `.mkv` trong thư mục đã chọn.
-8. Khi xong, bấm **Mở thư mục output**.
-
-Danh sách video có thumbnail preview để dễ nhận biết từng phần. Thumbnail được tạo bằng FFmpeg trong worker riêng nên không làm treo giao diện.
-
-## Build file `.exe` bằng PyInstaller
-
-Kích hoạt virtual environment rồi chạy:
-
-```powershell
-pyinstaller --noconfirm --clean --windowed --onefile --name FastVideoConcat --icon "assets\app_icon.ico" --add-data "tools;tools" --add-data "assets;assets" main.py
-```
-
-File `.exe` sẽ nằm tại:
-
-```text
-dist\FastVideoConcat.exe
-```
-
-Lưu ý:
-
-- Lệnh trên đóng gói cả thư mục `tools`, gồm `ffmpeg.exe` và `ffprobe.exe`, vào file `.exe`.
-- Icon app nằm tại `assets\app_icon.ico` và được nhúng vào file `.exe`.
-- File `.exe` sẽ lớn vì chứa PySide6 và FFmpeg.
-- Khi mở bản `--onefile`, Windows có thể mất vài giây để giải nén nội bộ trước khi cửa sổ hiện ra.
-
-## Pipeline batch mới
-
-Web đang hỗ trợ thêm pipeline hàng loạt cho từng video độc lập:
-
-```text
-voice / bỏ nhạc nền -> cắt đoạn -> zoom so le -> final.mp4
-```
-
-Mỗi video có thể xuất theo kiểu:
-
-```text
-OUTPUT/Video_01/
-  voice.wav
-  segment_001.mp4
-  segment_002.mp4
-  final.mp4
-```
-
-Nếu AI tách giọng (Demucs) chưa có hoặc chạy lỗi, pipeline sẽ ghi log và fallback giữ audio gốc để tránh làm dừng toàn bộ batch.
 
 ## Giới hạn có chủ đích
 
-- Stream copy là đường xử lý chính; app không render lại video để tự sửa file lỗi.
-- Không tự sửa được mọi file không tương thích hoặc bitstream hỏng nặng.
-- Không phải video editor và không render lại toàn bộ video theo kiểu timeline.
-- Không đảm bảo nối đúng nếu file khác codec, độ phân giải, fps, audio layout hoặc stream layout.
-- Với video gần 100 tiếng, hãy lưu output vào ổ đĩa còn nhiều dung lượng và định dạng file system hỗ trợ file lớn, ví dụ NTFS.
+- Không phải video editor timeline; chỉ chạy đúng 1 pipeline cố định (tách giọng -> cắt -> zoom so le -> final.mp4).
+- Cần FFmpeg hỗ trợ `h264_nvenc` + driver NVIDIA hợp lệ để dùng chế độ mã hóa GPU; nếu không có, app tự fallback CPU (libx264).
+- Bước tách giọng AI cần `.venv-demucs` hợp lệ (có `numpy`, `demucs`, `torch`); thiếu một trong số này sẽ fallback giữ audio gốc thay vì báo lỗi dừng batch.

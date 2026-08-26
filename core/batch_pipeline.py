@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -10,6 +13,165 @@ from typing import Callable
 from core.ffmpeg_tools import hidden_subprocess_kwargs, media_duration_from_probe, run_ffprobe, write_concat_list
 
 GPU_ENCODER_MODES = {"auto", "nvidia", "cpu"}
+
+
+def _app_dir() -> Path:
+    """Thư mục chứa file .exe khi đã đóng gói (PyInstaller), hoặc thư mục gốc project khi chạy từ source.
+    Dùng cho tài nguyên nằm CẠNH exe (bản portable), vd .venv-demucs — __file__ không dùng được ở đây vì
+    PyInstaller nén các module .py vào archive, __file__ lúc đó không còn là đường dẫn thật trên đĩa."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+def _bundle_dir() -> Path:
+    """Thư mục chứa tài nguyên đã đóng gói VÀO exe qua PyInstaller `datas` (vd assets/)."""
+    if getattr(sys, "frozen", False):
+        bundle = getattr(sys, "_MEIPASS", None)
+        if bundle:
+            return Path(bundle).resolve()
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+BUILTIN_EFFECTS_DIR = _bundle_dir() / "assets" / "effects"
+USER_EFFECTS_DIR = Path.home() / ".fast_video_studio" / "effects"
+EFFECTS_MANIFEST_PATH = USER_EFFECTS_DIR / "effects.json"
+BUILTIN_OPACITY_OVERRIDES_PATH = USER_EFFECTS_DIR / "builtin_opacity.json"
+_INVALID_FILENAME_CHARS = '\\/:*?"<>|'
+
+
+def _safe_effect_filename(name: str) -> str:
+    cleaned = "".join("_" if ch in _INVALID_FILENAME_CHARS else ch for ch in (name or "").strip())
+    return cleaned.strip(" .") or "effect"
+
+
+@dataclass(slots=True)
+class EffectPreset:
+    """1 hiệu ứng lớp phủ đã tạo qua tab Hiệu ứng: video overlay + độ trong suốt đã chọn sẵn khi tạo —
+    vào dự án chỉ cần chọn theo tên, không cần chỉnh lại độ trong suốt mỗi lần."""
+    name: str
+    path: Path
+    opacity: float
+    builtin: bool = False
+
+
+def _load_effects_manifest() -> list[dict]:
+    if not EFFECTS_MANIFEST_PATH.is_file():
+        return []
+    try:
+        data = json.loads(EFFECTS_MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _save_effects_manifest(items: list[dict]) -> None:
+    USER_EFFECTS_DIR.mkdir(parents=True, exist_ok=True)
+    EFFECTS_MANIFEST_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_builtin_opacity_overrides() -> dict[str, float]:
+    if not BUILTIN_OPACITY_OVERRIDES_PATH.is_file():
+        return {}
+    try:
+        data = json.loads(BUILTIN_OPACITY_OVERRIDES_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def set_builtin_effect_opacity(name: str, opacity: float) -> None:
+    """Ghi đè độ trong suốt cho 1 hiệu ứng CÓ SẴN (đóng gói cùng app) — hiệu ứng có sẵn mặc định 100%,
+    dùng hàm này để chỉnh riêng mà không cần copy/tạo lại video."""
+    overrides = _load_builtin_opacity_overrides()
+    overrides[name] = max(0.0, min(1.0, opacity))
+    USER_EFFECTS_DIR.mkdir(parents=True, exist_ok=True)
+    BUILTIN_OPACITY_OVERRIDES_PATH.write_text(json.dumps(overrides, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def list_effects() -> list[EffectPreset]:
+    """Danh sách hiệu ứng đã tạo: hiệu ứng có sẵn đóng gói cùng app (assets/effects, độ trong suốt mặc định
+    100% trừ khi có ghi đè qua set_builtin_effect_opacity) + hiệu ứng người dùng tự tạo qua tab Hiệu ứng
+    (~/.fast_video_studio/effects, có độ trong suốt riêng, ghi được kể cả khi app đã đóng gói read-only).
+    Trùng tên thì ưu tiên bản người dùng tự tạo."""
+    presets: dict[str, EffectPreset] = {}
+    builtin_overrides = _load_builtin_opacity_overrides()
+    if BUILTIN_EFFECTS_DIR.is_dir():
+        for path in sorted(BUILTIN_EFFECTS_DIR.glob("*.mp4")):
+            opacity = max(0.0, min(1.0, float(builtin_overrides.get(path.stem, 1.0))))
+            presets[path.stem] = EffectPreset(name=path.stem, path=path, opacity=opacity, builtin=True)
+    for item in _load_effects_manifest():
+        name = str(item.get("name") or "").strip()
+        file_name = str(item.get("file") or "")
+        if not name or not file_name:
+            continue
+        path = USER_EFFECTS_DIR / file_name
+        if not path.is_file():
+            continue
+        try:
+            opacity = float(item.get("opacity", 1.0))
+        except (TypeError, ValueError):
+            opacity = 1.0
+        presets[name] = EffectPreset(name=name, path=path, opacity=max(0.0, min(1.0, opacity)), builtin=False)
+    return sorted(presets.values(), key=lambda p: p.name.lower())
+
+
+def get_effect(name: str) -> EffectPreset | None:
+    if not name:
+        return None
+    for preset in list_effects():
+        if preset.name == name:
+            return preset
+    return None
+
+
+def create_effect(name: str, source_video: str | Path, opacity: float) -> EffectPreset:
+    """Tạo (hoặc cập nhật, nếu trùng tên) 1 hiệu ứng: copy video overlay vào thư mục người dùng + lưu độ
+    trong suốt đã chọn vào manifest. Dùng cho tab 'Hiệu ứng' — sau khi tạo, các dự án chỉ cần chọn theo tên."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Tên hiệu ứng không được để trống.")
+    source_path = Path(source_video)
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Không tìm thấy video: {source_path}")
+    USER_EFFECTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    existing = _load_effects_manifest()
+    old = next((it for it in existing if str(it.get("name") or "") == name), None)
+    if old and old.get("file"):
+        try:
+            (USER_EFFECTS_DIR / str(old["file"])).unlink(missing_ok=True)
+        except OSError:
+            pass
+    items = [it for it in existing if str(it.get("name") or "") != name]
+
+    suffix = source_path.suffix or ".mp4"
+    target_name = f"{uuid.uuid4().hex[:8]}_{_safe_effect_filename(name)}{suffix}"
+    target_path = USER_EFFECTS_DIR / target_name
+    shutil.copy2(source_path, target_path)
+
+    opacity = max(0.0, min(1.0, opacity))
+    items.append({"name": name, "file": target_name, "opacity": opacity})
+    _save_effects_manifest(items)
+    return EffectPreset(name=name, path=target_path, opacity=opacity)
+
+
+def delete_effect(name: str) -> None:
+    """Xóa 1 hiệu ứng do người dùng tự tạo. Hiệu ứng có sẵn (builtin, không có trong manifest) sẽ bị bỏ qua."""
+    items = _load_effects_manifest()
+    remaining: list[dict] = []
+    for item in items:
+        if str(item.get("name") or "") == name:
+            file_name = item.get("file")
+            if file_name:
+                try:
+                    (USER_EFFECTS_DIR / str(file_name)).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            continue
+        remaining.append(item)
+    _save_effects_manifest(remaining)
 
 
 def _normalize_encoder_mode(value: str) -> str:
@@ -78,11 +240,12 @@ def _validate_final_output(
     final_path: Path,
     ffprobe_path: str,
     *,
+    speed_factor: float = 1.0,
     emit_log: Callable[[str], None],
 ) -> None:
     source_probe = run_ffprobe(src, ffprobe_path=ffprobe_path)
     final_probe = run_ffprobe(final_path, ffprobe_path=ffprobe_path)
-    source_duration = _effective_video_duration(source_probe)
+    source_duration = _effective_video_duration(source_probe) / speed_factor
     final_duration = _effective_video_duration(final_probe)
     duration_diff = abs(final_duration - source_duration)
 
@@ -94,10 +257,10 @@ def _validate_final_output(
         raise RuntimeError("final.mp4 không có audio stream hợp lệ.")
 
     emit_log(
-        f"Validate final: source={source_duration:.3f}s final={final_duration:.3f}s lệch={duration_diff:.3f}s"
+        f"Validate final: expected={source_duration:.3f}s final={final_duration:.3f}s lệch={duration_diff:.3f}s"
     )
     if duration_diff > 0.1:
-        emit_log("Cảnh báo: duration final lệch quá 0.1s so với source.")
+        emit_log("Cảnh báo: duration final lệch quá 0.1s so với dự kiến.")
 
 
 def _append_process_log(log_path: Path, message: str) -> None:
@@ -175,31 +338,34 @@ def _run(
 
 
 def _demucs_python() -> str:
-    project_root = Path(__file__).resolve().parents[1]
-    local_python = project_root / ".venv-demucs" / "Scripts" / "python.exe"
+    local_python = _app_dir() / ".venv-demucs" / "Scripts" / "python.exe"
     if local_python.is_file():
         return str(local_python)
     return sys.executable
 
 
 def _run_demucs_vocal(
-    src: Path,
+    audio_source: Path,
     work_dir: Path,
     *,
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
 ) -> Path | None:
+    """audio_source PHẢI là file audio thuần (vd original_audio.wav), KHÔNG phải video .mp4 —
+    backend nạp audio mới của Demucs (sphn) không đọc được container video (lỗi 'no channel')."""
     demucs_root = work_dir / "demucs"
     demucs_root.mkdir(parents=True, exist_ok=True)
     python_path = _demucs_python()
-    cmd = [python_path, "-m", "demucs", "--two-stems=vocals", "-o", str(demucs_root), str(src)]
-    emit_log(f"AI: tách giọng chính khỏi nhạc nền bằng Demucs ({python_path})...")
+    # htdemucs_ft: bag 4 model đã fine-tune riêng từng nguồn (vocals/drums/bass/other), tách giọng sạch
+    # hơn hẳn bản mặc định htdemucs (1 model) — đổi lại tốn ~4x thời gian, vẫn rất nhanh nếu có GPU.
+    cmd = [python_path, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs_ft", "-o", str(demucs_root), str(audio_source)]
+    emit_log(f"AI: tách giọng chính khỏi nhạc nền bằng Demucs (model htdemucs_ft, {python_path})...")
     rc = _run(cmd, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
     if rc != 0 or stop_check():
         emit_log(f"Demucs không chạy thành công (exit {rc}); sẽ giữ audio gốc.")
         return None
-    candidates = list(demucs_root.glob(f"**/{src.stem}/vocals.*")) + list(demucs_root.glob("**/vocals.*"))
+    candidates = list(demucs_root.glob(f"**/{audio_source.stem}/vocals.*")) + list(demucs_root.glob("**/vocals.*"))
     for item in candidates:
         if item.is_file():
             return item.resolve()
@@ -214,6 +380,7 @@ def _prepare_voice_track(
     *,
     enable_ai_voice: bool,
     remove_background: bool,
+    speed_factor: float = 1.0,
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
@@ -242,7 +409,7 @@ def _prepare_voice_track(
     vocal_audio: Path | None = None
     if enable_ai_voice or remove_background:
         vocal_audio = _run_demucs_vocal(
-            src,
+            original_audio,
             audio_dir,
             emit_log=emit_log,
             stop_check=stop_check,
@@ -255,12 +422,13 @@ def _prepare_voice_track(
         emit_log("Không dùng AI voice hoặc AI không khả dụng: dùng audio gốc làm voice tham chiếu.")
     else:
         emit_log("AI voice OK: dùng vocals đã tách để ghép final.")
-    rc = _run(
-        [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(source_audio), "-ac", "2", "-ar", "44100", str(voice_wav)],
-        emit_log=emit_log,
-        stop_check=stop_check,
-        active_processes=active_processes,
-    )
+    cmd = [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(source_audio), "-ac", "2", "-ar", "44100"]
+    if abs(speed_factor - 1.0) > 1e-3:
+        # atempo chỉ hợp lệ trong khoảng 0.5-2.0 cho 1 lần áp — speed_factor đã được clamp cùng khoảng
+        # ở process_voice_split_alternate_zoom_batch nên không cần chain nhiều atempo.
+        cmd += ["-filter:a", f"atempo={speed_factor:.6f}"]
+    cmd += [str(voice_wav)]
+    rc = _run(cmd, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
     if rc != 0:
         emit_log(f"Cảnh báo: không xuất được voice.wav (exit {rc}).")
         return None, "voice_export_failed"
@@ -326,42 +494,98 @@ def _split_exact_segments(
     return segments
 
 
+def _probe_dimensions(path: Path, ffprobe_path: str) -> tuple[int, int]:
+    payload = run_ffprobe(path, ffprobe_path=ffprobe_path)
+    video_stream = next((s for s in payload.get("streams", []) if s.get("codec_type") == "video"), None)
+    if not video_stream:
+        return 0, 0
+    try:
+        return int(video_stream.get("width") or 0), int(video_stream.get("height") or 0)
+    except (TypeError, ValueError):
+        return 0, 0
+
+
 def _zoom_segment(
     src: Path,
     output_path: Path,
     ffmpeg_path: str,
+    ffprobe_path: str,
     *,
     zoom_percent: int,
     zoom_mode: str,
     pos_x: int,
     pos_y: int,
+    width: int = 0,
+    height: int = 0,
     crf: str,
     bitrate: str,
     encoder_mode: str = "cpu",
     encoder_preset: str = "p4",
+    effect_path: Path | None = None,
+    effect_opacity: float = 1.0,
+    upscale_4k: bool = False,
+    speed_factor: float = 1.0,
     emit_log: Callable[[str], None],
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
 ) -> None:
+    """Zoom 1 đoạn, và (nếu có) phủ hiệu ứng lớp phủ + render 4K + đổi tốc độ NGAY TRONG CÙNG 1 lần encode
+    này — tránh phải render lại toàn bộ video thêm 1 lần riêng sau khi ghép final.mp4 (chậm gấp đôi)."""
     if _usable_file(output_path):
         emit_log(f"Resume: dùng lại segment đã zoom {output_path.name}")
         return
     zoom = max(25, min(300, int(zoom_percent))) / 100
-    if zoom == 1:
-        vf = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    if width <= 0 or height <= 0:
+        # Không rõ kích thước gốc: fallback công thức tương đối cũ (chỉ an toàn khi zoom >= 100%).
+        vf_zoom = "scale=trunc(iw/2)*2:trunc(ih/2)*2" if zoom == 1 else (
+            f"scale=iw*{zoom:.4f}:ih*{zoom:.4f},crop=trunc(iw/{zoom:.4f}/2)*2:trunc(ih/{zoom:.4f}/2)*2:(iw-ow)/2:(ih-oh)/2"
+        )
+    elif zoom == 1:
+        vf_zoom = f"scale={width}:{height}"
     else:
-        if zoom_mode == "custom":
-            crop_x = f"(iw-ow)/2+{int(pos_x)}"
-            crop_y = f"(ih-oh)/2+{int(pos_y)}"
+        # Luôn tính kích thước scale/crop bằng số nguyên cụ thể (không dùng iw/ih tương đối trong biểu thức
+        # crop) để đảm bảo mọi đoạn (dù zoom khác nhau) ra đúng width x height gốc — nếu không, crop có thể
+        # yêu cầu vùng LỚN HƠN khung hình đã scale (đặc biệt khi zoom < 100%, tức thu nhỏ) và FFmpeg báo lỗi
+        # "Invalid too big or non positive size for width/height".
+        scaled_w = max(2, round(width * zoom / 2) * 2)
+        scaled_h = max(2, round(height * zoom / 2) * 2)
+        if zoom > 1:
+            offset_x = (scaled_w - width) // 2 + (int(pos_x) if zoom_mode == "custom" else 0)
+            offset_y = (scaled_h - height) // 2 + (int(pos_y) if zoom_mode == "custom" else 0)
+            offset_x = max(0, min(scaled_w - width, offset_x))
+            offset_y = max(0, min(scaled_h - height, offset_y))
+            vf_zoom = f"scale={scaled_w}:{scaled_h},crop={width}:{height}:{offset_x}:{offset_y}"
         else:
-            crop_x = "(iw-ow)/2"
-            crop_y = "(ih-oh)/2"
-        vf = f"scale=iw*{zoom:.4f}:ih*{zoom:.4f},crop=trunc(iw/{zoom:.4f}/2)*2:trunc(ih/{zoom:.4f}/2)*2:{crop_x}:{crop_y}"
-    cmd = [
-        ffmpeg_path, "-hide_banner", "-y", "-nostdin",
-        "-i", str(src), "-vf", vf,
-    ] + _video_encode_args(encoder_mode=encoder_mode, encoder_preset=encoder_preset, bitrate=bitrate, crf=crf)
-    cmd += ["-an", str(output_path)]
+            offset_x = (width - scaled_w) // 2
+            offset_y = (height - scaled_h) // 2
+            vf_zoom = f"scale={scaled_w}:{scaled_h},pad={width}:{height}:{offset_x}:{offset_y}:black"
+
+    if abs(speed_factor - 1.0) > 1e-3:
+        vf_zoom = f"{vf_zoom},setpts=PTS/{speed_factor:.6f}"
+
+    video_args = _video_encode_args(encoder_mode=encoder_mode, encoder_preset=encoder_preset, bitrate=bitrate, crf=crf)
+    cmd = [ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(src)]
+    if effect_path is None:
+        vf = f"{vf_zoom},scale=3840:2160:flags=lanczos" if upscale_4k else vf_zoom
+        cmd += ["-vf", vf] + video_args + ["-an", str(output_path)]
+    else:
+        # -shortest không đủ tin cậy để dừng đúng lúc khi 1 input là -stream_loop -1 (vô hạn) đi qua
+        # filter_complex nhiều tầng — dùng -t bằng đúng duration THỰC TẾ sau khi đổi tốc độ để CHẮC CHẮN
+        # dừng đúng lúc, tránh FFmpeg chạy vô thời hạn theo input hiệu ứng đã lặp lại vô hạn.
+        segment_duration = _media_video_duration(src, ffprobe_path) / speed_factor
+        opacity = max(0.0, min(1.0, effect_opacity))
+        target = "3840:2160" if upscale_4k else f"{width}:{height}"
+        filter_complex = (
+            f"[0:v]{vf_zoom}[stage0];"
+            f"[stage0]scale={target}:flags=lanczos,format=yuv420p[zoomed];"
+            f"[1:v]scale={target}:flags=lanczos,format=yuv420p[fx];"
+            f"[zoomed][fx]blend=all_mode=grainmerge:all_opacity={opacity:.3f},format=yuv420p[vout]"
+        )
+        cmd += ["-stream_loop", "-1", "-i", str(effect_path)]
+        cmd += ["-filter_complex", filter_complex, "-map", "[vout]"]
+        if segment_duration > 0:
+            cmd += ["-t", f"{segment_duration:.3f}"]
+        cmd += video_args + ["-an", str(output_path)]
     emit_log(f"Zoom đoạn {src.name}: {zoom_percent}% -> {output_path.name}")
     rc = _run(cmd, emit_log=emit_log, stop_check=stop_check, active_processes=active_processes)
     if rc != 0 or not output_path.exists():
@@ -374,6 +598,7 @@ def _pad_final_duration(
     ffmpeg_path: str,
     ffprobe_path: str,
     *,
+    speed_factor: float = 1.0,
     encoder_mode: str,
     encoder_preset: str,
     crf: str,
@@ -382,7 +607,7 @@ def _pad_final_duration(
     stop_check: Callable[[], bool],
     active_processes: list[subprocess.Popen[str]],
 ) -> None:
-    source_duration = _media_video_duration(src, ffprobe_path)
+    source_duration = _media_video_duration(src, ffprobe_path) / speed_factor
     final_duration = _media_video_duration(final_path, ffprobe_path)
     missing = source_duration - final_duration
     if missing <= 0.1 or missing > 1.5:
@@ -528,6 +753,9 @@ def process_voice_split_alternate_zoom_batch(
     final_concat_mode: str = "fast",
     encoder_mode: str = "auto",
     encoder_preset: str = "p4",
+    effect_name: str = "",
+    upscale_4k: bool = False,
+    speed_percent: int = 100,
     resume_enabled: bool = True,
     emit_log: Callable[[str], None],
     emit_progress: Callable[[int], None],
@@ -541,6 +769,9 @@ def process_voice_split_alternate_zoom_batch(
     Nếu AI không khả dụng, pipeline giữ audio gốc và tiếp tục xử lý để không kẹt cả batch.
     """
     encoder_mode = _normalize_encoder_mode(encoder_mode)
+    # atempo (audio) chỉ hợp lệ 1 lần áp trong khoảng 0.5-2.0 — giới hạn tốc độ video trong cùng khoảng
+    # để audio/video luôn đồng bộ mà không cần chain nhiều atempo.
+    speed_factor = max(0.5, min(2.0, (speed_percent or 100) / 100))
     paths = [Path(p).resolve() for p in input_paths if Path(p).is_file()]
     if not paths:
         return False, "Không có video nguồn hợp lệ."
@@ -609,6 +840,7 @@ def process_voice_split_alternate_zoom_batch(
                 ffmpeg_path,
                 enable_ai_voice=enable_ai_voice,
                 remove_background=remove_background,
+                speed_factor=speed_factor,
                 emit_log=video_log,
                 stop_check=stop_check,
                 active_processes=active_processes,
@@ -646,6 +878,18 @@ def process_voice_split_alternate_zoom_batch(
 
             report_video_progress(video_index, 0.40)
 
+            src_width, src_height = _probe_dimensions(src, ffprobe_path)
+            if src_width <= 0 or src_height <= 0:
+                video_log("Cảnh báo: không xác định được độ phân giải gốc; zoom < 100% có thể lỗi.")
+
+            effect_preset = get_effect(effect_name)
+            effect_path = effect_preset.path if effect_preset else None
+            effect_opacity = effect_preset.opacity if effect_preset else 1.0
+            if effect_path is not None or upscale_4k:
+                fx_label = f"hiệu ứng '{effect_preset.name}' ({effect_opacity * 100:.0f}%)" if effect_path else ""
+                render_label = " + ".join(p for p in (fx_label, "render 4K" if upscale_4k else "") if p)
+                video_log(f"Sẽ phủ {render_label} ngay trong bước zoom từng đoạn (không render lại video lần 2).")
+
             final_segments: list[Path] = []
             emit_status({"current_step": "Zoom xen kẽ từng đoạn"})
             _write_video_state(state_path, {"status": "running", "step": "Zoom xen kẽ từng đoạn", "raw_segments": len(raw_segments)})
@@ -656,14 +900,21 @@ def process_voice_split_alternate_zoom_batch(
                     raw,
                     out,
                     ffmpeg_path,
+                    ffprobe_path,
                     zoom_percent=zoom,
                     zoom_mode=zoom_mode,
                     pos_x=pos_x,
                     pos_y=pos_y,
+                    width=src_width,
+                    height=src_height,
                     crf=crf,
                     bitrate=bitrate,
                     encoder_mode=video_encoder_mode,
                     encoder_preset=encoder_preset,
+                    effect_path=effect_path,
+                    effect_opacity=effect_opacity,
+                    upscale_4k=upscale_4k,
+                    speed_factor=speed_factor,
                     emit_log=video_log,
                     stop_check=stop_check,
                     active_processes=active_processes,
@@ -726,14 +977,21 @@ def process_voice_split_alternate_zoom_batch(
                             raw,
                             out,
                             ffmpeg_path,
+                            ffprobe_path,
                             zoom_percent=zoom,
                             zoom_mode=zoom_mode,
                             pos_x=pos_x,
                             pos_y=pos_y,
+                            width=src_width,
+                            height=src_height,
                             crf=crf,
                             bitrate=bitrate,
                             encoder_mode=video_encoder_mode,
                             encoder_preset=encoder_preset,
+                            effect_path=effect_path,
+                            effect_opacity=effect_opacity,
+                            upscale_4k=upscale_4k,
+                            speed_factor=speed_factor,
                             emit_log=video_log,
                             stop_check=stop_check,
                             active_processes=active_processes,
@@ -767,6 +1025,7 @@ def process_voice_split_alternate_zoom_batch(
                 final_path,
                 ffmpeg_path,
                 ffprobe_path,
+                speed_factor=speed_factor,
                 encoder_mode=video_encoder_mode,
                 encoder_preset=encoder_preset,
                 crf=crf,
@@ -778,7 +1037,7 @@ def process_voice_split_alternate_zoom_batch(
 
             emit_status({"current_step": "Kiểm tra final.mp4"})
             _write_video_state(state_path, {"status": "running", "step": "Kiểm tra final.mp4"})
-            _validate_final_output(src, final_path, ffprobe_path, emit_log=video_log)
+            _validate_final_output(src, final_path, ffprobe_path, speed_factor=speed_factor, emit_log=video_log)
             report_video_progress(video_index, 0.98)
             ok_count += 1
             emit_status({

@@ -16,6 +16,62 @@ def build_app_stylesheet() -> str:
         background: #0b0d12;
     }
 
+    /* ── Dialog / popup windows ────────────────────────────────────────── */
+    QDialog {
+        background: #11151f;
+    }
+    QDialog QLabel {
+        color: #e7ecf3;
+    }
+    QDialogButtonBox QPushButton {
+        min-width: 80px;
+    }
+
+    /* ── Context menu (QMenu) ───────────────────────────────────────────── */
+    QMenu {
+        background: #111722;
+        border: 1px solid #283246;
+        border-radius: 8px;
+        padding: 4px;
+        color: #e7ecf3;
+    }
+    QMenu::item {
+        padding: 8px 20px 8px 14px;
+        border-radius: 5px;
+        color: #e7ecf3;
+    }
+    QMenu::item:selected {
+        background: #1e3a4a;
+        color: #2dd4bf;
+    }
+    QMenu::item:disabled {
+        color: #586274;
+    }
+    QMenu::separator {
+        height: 1px;
+        background: #202838;
+        margin: 4px 10px;
+    }
+
+    /* ── ComboBox popup list ────────────────────────────────────────────── */
+    QComboBox QAbstractItemView {
+        background: #111722;
+        border: 1px solid #283246;
+        border-radius: 6px;
+        color: #eef2f7;
+        outline: 0;
+        padding: 4px;
+        selection-background-color: #2dd4bf;
+        selection-color: #071113;
+    }
+    QComboBox QAbstractItemView::item {
+        padding: 6px 12px;
+        min-height: 28px;
+    }
+    QComboBox QAbstractItemView::item:hover {
+        background: #1b2535;
+    }
+
     QLabel#appTitle {
         color: #ffffff;
         font-size: 20pt;

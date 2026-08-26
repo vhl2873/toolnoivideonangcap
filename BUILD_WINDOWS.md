@@ -1,30 +1,26 @@
 # Build Windows Portable Release
 
-Mục tiêu: tạo gói **portable** có thể copy sang máy Windows khác, giải nén và chạy ngay.
+Mục tiêu: tạo gói **portable** desktop app, copy sang máy Windows khác, giải nén và chạy ngay.
 
 ## Gói phát hành
 
 ```text
-FastVideoStudio_Portable/
-  FastVideoDesktop.exe
-  FastVideoWeb.exe
-  START_WEB.bat
+FastVideoStudio_Portable.zip
+  FastVideoStudio.exe
   README.md
   tools/
     ffmpeg/
       bin/
         ffmpeg.exe
         ffprobe.exe
-  .venv-demucs/            # nếu đã cài Demucs local
+  .venv-demucs/            # nếu đã cài Demucs local trước khi build
 ```
 
 ## Ý nghĩa
 
-- `FastVideoDesktop.exe`: giao diện desktop PySide6 cũ
-- `FastVideoWeb.exe`: local web control panel tại `http://127.0.0.1:8765`
-- `START_WEB.bat`: mở bản web nhanh, ưu tiên `FastVideoWeb.exe`
+- `FastVideoStudio.exe`: giao diện desktop PySide6 (pipeline tách giọng -> cắt -> zoom so le -> final.mp4)
 - `tools/ffmpeg/bin`: người nhận **không cần tự cài FFmpeg**
-- `.venv-demucs/`: nếu có, bản portable sẽ dùng để tách voice/xóa nhạc nền thật thay vì fallback audio gốc
+- `.venv-demucs/`: nếu có, bản portable sẽ dùng để tách voice/xóa nhạc nền AI thật thay vì fallback audio gốc
 
 ## Chuẩn bị
 
@@ -33,7 +29,6 @@ Khuyến nghị build trên chính máy đã test app:
 ```powershell
 cd C:\Users\ADMIN\Downloads\toolnoivideonangcap
 python -m pip install --upgrade pip
-python -m pip install pyinstaller
 python -m pip install -r requirements.txt
 ```
 
@@ -42,7 +37,14 @@ Nếu muốn mang luôn AI tách voice vào bản portable, tạo/cài local ven
 ```powershell
 py -3.10 -m venv .venv-demucs
 .\.venv-demucs\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
-.\.venv-demucs\Scripts\python.exe -m pip install demucs
+.\.venv-demucs\Scripts\python.exe -m pip install numpy demucs
+```
+
+Nếu máy build có GPU NVIDIA, cài thêm bản PyTorch CUDA để tách giọng nhanh hơn nhiều (vẫn portable — máy
+nhận không có GPU NVIDIA vẫn chạy được, chỉ tự động dùng CPU):
+
+```powershell
+.\.venv-demucs\Scripts\python.exe -m pip install --index-url https://download.pytorch.org/whl/cu126 torch
 ```
 
 ## Build tự động
@@ -54,8 +56,7 @@ powershell -ExecutionPolicy Bypass -File .\build_portable.ps1
 ```
 
 Script sẽ:
-- build `FastVideoDesktop.exe`
-- build `FastVideoWeb.exe`
+- build `FastVideoStudio.exe` bằng PyInstaller (`FastVideoStudio.spec`)
 - copy FFmpeg portable
 - copy `.venv-demucs` nếu có
 - tạo file zip:
@@ -68,23 +69,28 @@ dist\FastVideoStudio_Portable.zip
 
 ### 1) Demucs / AI voice
 
-Pipeline batch sẽ ưu tiên dùng:
+Pipeline batch (`core/batch_pipeline.py`) sẽ ưu tiên dùng:
 
 ```text
 .venv-demucs\Scripts\python.exe
 ```
 
-nếu thư mục này tồn tại cạnh app/project. Nếu không có, app fallback về Python hiện tại.
+nằm CẠNH file `.exe` (không phải cạnh source `.py`) — quan trọng khi đã đóng gói bằng PyInstaller, vì
+`__file__` của module Python bên trong archive không còn là đường dẫn thật trên đĩa. Hàm `_app_dir()`
+trong `core/batch_pipeline.py` xử lý việc này bằng `sys.executable` khi `sys.frozen` (đã đóng gói).
 
-### 2) Data của web app
+Nếu `.venv-demucs` không tồn tại cạnh exe, app vẫn chạy bình thường, chỉ là bước xóa nhạc nền sẽ fallback
+sang audio gốc thay vì báo lỗi dừng batch.
 
-Khi chạy bản `FastVideoWeb.exe`, app sẽ:
-- đọc resource web từ bundle PyInstaller
-- ghi dữ liệu project/output vào thư mục cạnh file `.exe`, không ghi vào thư mục tạm `_MEIPASS`
+### 2) File hiệu ứng hạt phim (film_grain_overlay.mp4)
 
-### 3) Nếu máy nhận không dùng AI voice
+Nằm trong `assets/`, được PyInstaller đóng gói vào bên trong `.exe` qua `datas` trong spec — dùng
+`sys._MEIPASS` (`_bundle_dir()`) để tìm đúng đường dẫn khi đã đóng gói.
 
-Vẫn chạy bình thường nếu thiếu `.venv-demucs`, chỉ là phần xóa nhạc nền sẽ fallback sang audio gốc.
+### 3) Dữ liệu dự án
+
+`ProjectStore` mặc định lưu tại `%USERPROFILE%\.fast_video_studio\projects.db` — không phụ thuộc thư mục
+cài đặt/giải nén, nên xóa/di chuyển thư mục app không mất dữ liệu.
 
 ## Cách gửi cho máy khác
 
@@ -96,5 +102,5 @@ dist\FastVideoStudio_Portable.zip
 
 Bên nhận chỉ cần:
 1. giải nén
-2. chạy `FastVideoDesktop.exe` hoặc `START_WEB.bat`
-3. dùng luôn, không cần cài thêm FFmpeg
+2. chạy `FastVideoStudio.exe`
+3. dùng luôn, không cần cài thêm gì
